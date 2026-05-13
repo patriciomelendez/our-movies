@@ -600,6 +600,7 @@ let pwAction       = 'unlock';   // 'unlock' | 'change'
 let changePwMode   = false;
 let searchTimer    = null;
 let highlightId    = null;
+let searchResults  = [];
 
 // ─────────────────────────────────────────────
 // INIT
@@ -782,17 +783,18 @@ function onSearchInput() {
 
 function renderDropdown(results) {
     const dd = document.getElementById('searchDropdown');
-    if (!results.length) {
+    searchResults = results.slice(0, 8);
+
+    if (!searchResults.length) {
         dd.innerHTML = '<div style="padding:18px;color:#555;text-align:center;font-size:0.88rem">No results found</div>';
         dd.style.display = 'block';
         return;
     }
-    dd.innerHTML = results.slice(0, 8).map(r => {
+    dd.innerHTML = searchResults.map((r, i) => {
         const year = r.release_date ? r.release_date.slice(0,4) : '';
         const src  = r.poster_path ? `${TMDB_IMG_BASE}${r.poster_path}` : '';
-        const data = esc(JSON.stringify({ id: r.id, title: r.title, year, poster_path: r.poster_path||'', overview: r.overview||'' }));
         return `
-        <div class="result-item" onclick="selectMovie(${data})">
+        <div class="result-item" onclick="selectMovie(${i})">
             ${src
                 ? `<img class="result-thumb" src="${src}" alt="">`
                 : `<div class="result-thumb" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎬</div>`}
@@ -805,8 +807,10 @@ function renderDropdown(results) {
     dd.style.display = 'block';
 }
 
-async function selectMovie(raw) {
-    const r = typeof raw === 'string' ? JSON.parse(raw) : raw;
+async function selectMovie(index) {
+    const r = searchResults[index];
+    if (!r) return;
+
     document.getElementById('searchDropdown').style.display = 'none';
     document.getElementById('searchInput').value = '';
 
@@ -815,9 +819,9 @@ async function selectMovie(raw) {
     const movie = {
         tmdb_id:     r.id,
         title:       r.title,
-        year:        parseInt(r.year) || null,
-        poster_path: r.poster_path,
-        overview:    r.overview,
+        year:        r.release_date ? parseInt(r.release_date.slice(0,4)) : null,
+        poster_path: r.poster_path || '',
+        overview:    r.overview || '',
         trailer_key: trailerKey
     };
 
