@@ -244,6 +244,8 @@
         .ov-btn:hover { background: rgba(255,255,255,0.22); }
         .ov-btn.green { background: rgba(76,175,80,0.25); border-color: rgba(76,175,80,0.5); }
         .ov-btn.green:hover { background: rgba(76,175,80,0.45); }
+        .ov-btn.red { background: rgba(229,9,20,0.25); border-color: rgba(229,9,20,0.5); }
+        .ov-btn.red:hover { background: rgba(229,9,20,0.5); }
 
         .watched-badge {
             position: absolute;
@@ -915,6 +917,7 @@ function renderGrid(gridId, list) {
                 <div class="card-overlay">
                     <button class="ov-btn" onclick="event.stopPropagation();openDetail('${m.id}')">Info</button>
                     ${unlocked ? `<button class="ov-btn green" onclick="event.stopPropagation();toggleWatched('${m.id}')">${m.watched ? 'Unwatch' : 'Watched'}</button>` : ''}
+                    ${unlocked ? `<button class="ov-btn red" onclick="event.stopPropagation();removeMovie('${m.id}')">🗑</button>` : ''}
                 </div>
             </div>
             <div class="movie-info">
