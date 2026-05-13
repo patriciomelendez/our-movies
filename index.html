@@ -527,12 +527,12 @@
 
     <!-- Tabs -->
     <div class="tabs">
-        <button class="tab active" id="tab-towatch" onclick="switchTab('towatch')">🎬 To Watch</button>
-        <button class="tab" id="tab-watched" onclick="switchTab('watched')">✅ Watched</button>
+        <button class="tab active" id="tab-towatch" onclick="switchTab('towatch')">🎬 Movies</button>
         <button class="tab" id="tab-tvshows" onclick="switchTab('tvshows')">📺 TV Shows</button>
+        <button class="tab" id="tab-watched" onclick="switchTab('watched')">✅ Watched</button>
     </div>
 
-    <!-- To Watch -->
+    <!-- Movies To Watch -->
     <div id="section-towatch">
         <div class="section-header">
             <span class="section-count" id="count-towatch"></span>
@@ -543,15 +543,7 @@
         </div>
     </div>
 
-    <!-- Watched -->
-    <div id="section-watched" style="display:none">
-        <div class="section-header">
-            <span class="section-count" id="count-watched"></span>
-        </div>
-        <div class="movie-grid" id="grid-watched"></div>
-    </div>
-
-    <!-- TV Shows -->
+    <!-- TV Shows To Watch -->
     <div id="section-tvshows" style="display:none">
         <div class="section-header">
             <span class="section-count" id="count-tvshows-watch"></span>
@@ -560,12 +552,14 @@
         <div class="movie-grid" id="grid-tvshows-towatch">
             <div class="loading-state"><div class="spinner"></div></div>
         </div>
-        <div style="margin-top:32px">
-            <div class="section-header">
-                <span class="section-count" id="count-tvshows-watched"></span>
-            </div>
-            <div class="movie-grid" id="grid-tvshows-watched"></div>
+    </div>
+
+    <!-- Watched (all) -->
+    <div id="section-watched" style="display:none">
+        <div class="section-header">
+            <span class="section-count" id="count-watched"></span>
         </div>
+        <div class="movie-grid" id="grid-watched"></div>
     </div>
 </main>
 
@@ -937,7 +931,7 @@ function closeAddModal() {
 // ─────────────────────────────────────────────
 function switchTab(tab) {
     currentTab = tab;
-    ['towatch','watched','tvshows'].forEach(t => {
+    ['towatch','tvshows','watched'].forEach(t => {
         document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
         document.getElementById(`section-${t}`).style.display = t === tab ? 'block' : 'none';
     });
@@ -949,23 +943,20 @@ function switchTab(tab) {
 // RENDER
 // ─────────────────────────────────────────────
 function renderMovies() {
-    const films      = movies.filter(m => m.media_type !== 'tv');
-    const tvs        = movies.filter(m => m.media_type === 'tv');
+    const films     = movies.filter(m => m.media_type !== 'tv');
+    const tvs       = movies.filter(m => m.media_type === 'tv');
+    const allWatched = movies.filter(m => m.watched);
 
-    const towatch    = films.filter(m => !m.watched);
-    const watched    = films.filter(m =>  m.watched);
-    const tvTowatch  = tvs.filter(m => !m.watched);
-    const tvWatched  = tvs.filter(m =>  m.watched);
+    const towatch   = films.filter(m => !m.watched);
+    const tvTowatch = tvs.filter(m => !m.watched);
 
-    document.getElementById('count-towatch').textContent        = `${towatch.length} movie${towatch.length !== 1 ? 's' : ''} to watch`;
-    document.getElementById('count-watched').textContent        = `${watched.length} movie${watched.length !== 1 ? 's' : ''} watched`;
-    document.getElementById('count-tvshows-watch').textContent  = `${tvTowatch.length} show${tvTowatch.length !== 1 ? 's' : ''} to watch`;
-    document.getElementById('count-tvshows-watched').textContent = `${tvWatched.length} show${tvWatched.length !== 1 ? 's' : ''} watched`;
+    document.getElementById('count-towatch').textContent       = `${towatch.length} movie${towatch.length !== 1 ? 's' : ''} to watch`;
+    document.getElementById('count-tvshows-watch').textContent = `${tvTowatch.length} show${tvTowatch.length !== 1 ? 's' : ''} to watch`;
+    document.getElementById('count-watched').textContent       = `${allWatched.length} title${allWatched.length !== 1 ? 's' : ''} watched`;
 
     renderGrid('grid-towatch', towatch);
-    renderGrid('grid-watched', watched);
     renderGrid('grid-tvshows-towatch', tvTowatch);
-    renderGrid('grid-tvshows-watched', tvWatched);
+    renderGrid('grid-watched', allWatched);
 }
 
 function renderGrid(gridId, list) {
