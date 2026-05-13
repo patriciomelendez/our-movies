@@ -1,0 +1,1041 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Our Movies 🎬</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+
+        body {
+            background: #0f0f0f;
+            color: #fff;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            min-height: 100vh;
+        }
+
+        header {
+            background: #141414;
+            padding: 16px 28px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid #2a2a2a;
+            position: sticky;
+            top: 0;
+            z-index: 100;
+        }
+
+        .header-title {
+            font-size: 1.4rem;
+            font-weight: 800;
+            letter-spacing: -0.5px;
+            color: #fff;
+        }
+
+        .header-title span { color: #e50914; }
+
+        .header-right { display: flex; align-items: center; gap: 12px; }
+
+        .auth-status { font-size: 0.78rem; color: #4CAF50; }
+
+        .lock-btn {
+            background: #1e1e1e;
+            border: 1px solid #333;
+            color: #aaa;
+            cursor: pointer;
+            font-size: 1rem;
+            padding: 7px 12px;
+            border-radius: 8px;
+            transition: all 0.2s;
+        }
+
+        .lock-btn:hover { color: white; border-color: #555; }
+        .lock-btn.unlocked { color: #4CAF50; border-color: #4CAF50; }
+
+        main { max-width: 1400px; margin: 0 auto; padding: 28px 24px; }
+
+        /* Search */
+        .search-section { margin-bottom: 28px; }
+
+        .search-wrapper { display: flex; gap: 10px; max-width: 560px; }
+
+        .search-input {
+            flex: 1;
+            padding: 11px 16px;
+            background: #1a1a1a;
+            border: 1px solid #2e2e2e;
+            border-radius: 10px;
+            color: white;
+            font-size: 0.95rem;
+            transition: border-color 0.2s;
+        }
+
+        .search-input:focus { outline: none; border-color: #e50914; }
+        .search-input::placeholder { color: #555; }
+
+        .btn {
+            padding: 9px 18px;
+            border-radius: 9px;
+            border: none;
+            cursor: pointer;
+            font-size: 0.875rem;
+            font-weight: 600;
+            transition: all 0.18s;
+        }
+
+        .btn-red { background: #e50914; color: white; }
+        .btn-red:hover { background: #c20810; }
+        .btn-gray { background: #2a2a2a; color: #ccc; }
+        .btn-gray:hover { background: #363636; color: white; }
+        .btn-outline { background: transparent; color: #e50914; border: 1px solid #e50914; }
+        .btn-outline:hover { background: #e50914; color: white; }
+
+        /* Search dropdown */
+        .search-relative { position: relative; max-width: 560px; }
+
+        .search-dropdown {
+            position: absolute;
+            top: 6px;
+            left: 0;
+            right: 0;
+            background: #1c1c1c;
+            border: 1px solid #2e2e2e;
+            border-radius: 10px;
+            z-index: 300;
+            max-height: 380px;
+            overflow-y: auto;
+            box-shadow: 0 8px 32px rgba(0,0,0,0.6);
+        }
+
+        .result-item {
+            display: flex;
+            align-items: center;
+            gap: 14px;
+            padding: 10px 14px;
+            cursor: pointer;
+            border-bottom: 1px solid #252525;
+            transition: background 0.15s;
+        }
+
+        .result-item:hover { background: #242424; }
+        .result-item:last-child { border-bottom: none; }
+
+        .result-thumb {
+            width: 38px;
+            height: 57px;
+            object-fit: cover;
+            border-radius: 5px;
+            background: #2a2a2a;
+            flex-shrink: 0;
+        }
+
+        .result-info h4 { font-size: 0.88rem; font-weight: 600; }
+        .result-info p { font-size: 0.78rem; color: #777; margin-top: 2px; }
+
+        /* Tabs */
+        .tabs { display: flex; gap: 2px; border-bottom: 1px solid #222; margin-bottom: 26px; }
+
+        .tab {
+            padding: 11px 22px;
+            background: transparent;
+            border: none;
+            color: #666;
+            font-size: 0.9rem;
+            font-weight: 700;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            margin-bottom: -1px;
+            transition: all 0.2s;
+            letter-spacing: 0.3px;
+        }
+
+        .tab.active { color: #e50914; border-bottom-color: #e50914; }
+        .tab:hover:not(.active) { color: #bbb; }
+
+        /* Section header */
+        .section-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 22px;
+        }
+
+        .section-count { font-size: 0.85rem; color: #555; font-weight: 600; text-transform: uppercase; letter-spacing: 0.5px; }
+
+        .btn-random {
+            background: linear-gradient(135deg, #7c3aed, #4f46e5);
+            color: white;
+            padding: 10px 20px;
+            border-radius: 9px;
+            border: none;
+            cursor: pointer;
+            font-weight: 700;
+            font-size: 0.875rem;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            transition: opacity 0.2s, transform 0.15s;
+        }
+
+        .btn-random:hover { opacity: 0.88; transform: translateY(-1px); }
+        .btn-random:active { transform: translateY(0); }
+
+        /* Movie Grid */
+        .movie-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(155px, 1fr));
+            gap: 22px;
+        }
+
+        /* Movie Card */
+        .movie-card { cursor: pointer; transition: transform 0.2s; }
+        .movie-card:hover { transform: translateY(-5px); }
+        .movie-card:hover .card-overlay { opacity: 1; }
+
+        .poster-wrapper {
+            position: relative;
+            border-radius: 10px;
+            overflow: hidden;
+            aspect-ratio: 2/3;
+            background: #1a1a1a;
+        }
+
+        .movie-poster { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+        .poster-placeholder {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 2.5rem;
+            background: #1a1a1a;
+            color: #333;
+        }
+
+        .card-overlay {
+            position: absolute;
+            inset: 0;
+            background: rgba(0,0,0,0.72);
+            display: flex;
+            align-items: flex-end;
+            justify-content: center;
+            gap: 8px;
+            padding-bottom: 14px;
+            opacity: 0;
+            transition: opacity 0.2s;
+        }
+
+        .ov-btn {
+            background: rgba(255,255,255,0.12);
+            border: 1px solid rgba(255,255,255,0.25);
+            color: white;
+            padding: 5px 10px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 0.72rem;
+            font-weight: 700;
+            backdrop-filter: blur(6px);
+            transition: background 0.15s;
+        }
+
+        .ov-btn:hover { background: rgba(255,255,255,0.22); }
+        .ov-btn.green { background: rgba(76,175,80,0.25); border-color: rgba(76,175,80,0.5); }
+        .ov-btn.green:hover { background: rgba(76,175,80,0.45); }
+
+        .watched-badge {
+            position: absolute;
+            top: 8px;
+            right: 8px;
+            background: #4CAF50;
+            color: white;
+            border-radius: 50%;
+            width: 22px;
+            height: 22px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 0.75rem;
+            font-weight: 700;
+        }
+
+        .highlight-card .poster-wrapper {
+            box-shadow: 0 0 0 3px #7c3aed, 0 0 28px rgba(124,58,237,0.5);
+        }
+
+        .movie-info { margin-top: 9px; padding: 0 2px; }
+
+        .movie-title {
+            font-size: 0.83rem;
+            font-weight: 600;
+            line-height: 1.3;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .movie-year { font-size: 0.76rem; color: #666; margin-top: 2px; }
+
+        /* Empty */
+        .empty-state {
+            grid-column: 1 / -1;
+            text-align: center;
+            padding: 72px 20px;
+            color: #444;
+        }
+
+        .empty-state .ei { font-size: 3.5rem; margin-bottom: 14px; }
+        .empty-state p { font-size: 0.95rem; }
+
+        /* Loading */
+        .loading-state {
+            grid-column: 1 / -1;
+            display: flex;
+            justify-content: center;
+            padding: 60px;
+        }
+
+        .spinner {
+            width: 32px;
+            height: 32px;
+            border: 3px solid #222;
+            border-top-color: #e50914;
+            border-radius: 50%;
+            animation: spin 0.7s linear infinite;
+        }
+
+        @keyframes spin { to { transform: rotate(360deg); } }
+
+        /* Modals */
+        .modal-overlay {
+            position: fixed;
+            inset: 0;
+            background: rgba(0,0,0,0.88);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            padding: 20px;
+        }
+
+        .modal {
+            background: #171717;
+            border-radius: 16px;
+            padding: 28px;
+            width: 100%;
+            max-width: 460px;
+            border: 1px solid #2a2a2a;
+            position: relative;
+        }
+
+        .modal-lg { max-width: 680px; }
+
+        .modal-close {
+            position: absolute;
+            top: 18px;
+            right: 20px;
+            background: none;
+            border: none;
+            color: #555;
+            font-size: 1.5rem;
+            cursor: pointer;
+            line-height: 1;
+            transition: color 0.15s;
+        }
+
+        .modal-close:hover { color: #fff; }
+
+        .modal-title { font-size: 1.15rem; font-weight: 700; margin-bottom: 22px; }
+
+        /* Form */
+        .form-group { margin-bottom: 16px; }
+        .form-label { display: block; font-size: 0.82rem; color: #888; margin-bottom: 6px; font-weight: 600; }
+
+        .form-input {
+            width: 100%;
+            padding: 10px 14px;
+            background: #222;
+            border: 1px solid #333;
+            border-radius: 9px;
+            color: white;
+            font-size: 0.93rem;
+            transition: border-color 0.2s;
+        }
+
+        .form-input:focus { outline: none; border-color: #e50914; }
+
+        .form-actions { display: flex; gap: 10px; justify-content: flex-end; margin-top: 22px; }
+
+        .form-error { color: #e50914; font-size: 0.82rem; margin-top: 8px; display: none; }
+
+        /* Detail modal */
+        .detail-body { display: flex; gap: 24px; }
+
+        .detail-poster-wrap {
+            width: 150px;
+            flex-shrink: 0;
+            border-radius: 10px;
+            overflow: hidden;
+            background: #222;
+            aspect-ratio: 2/3;
+        }
+
+        .detail-poster-wrap img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+        .detail-poster-wrap .no-poster {
+            width: 100%;
+            height: 100%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 3rem;
+        }
+
+        .detail-info { flex: 1; min-width: 0; }
+        .detail-title { font-size: 1.3rem; font-weight: 800; line-height: 1.2; margin-bottom: 4px; }
+        .detail-year { color: #666; font-size: 0.88rem; margin-bottom: 14px; }
+
+        .detail-overview {
+            font-size: 0.875rem;
+            line-height: 1.65;
+            color: #bbb;
+            max-height: 160px;
+            overflow-y: auto;
+            margin-bottom: 18px;
+            padding-right: 4px;
+        }
+
+        .detail-actions { display: flex; flex-wrap: wrap; gap: 9px; }
+
+        .trailer-wrap {
+            position: relative;
+            padding-top: 56.25%;
+            margin-top: 22px;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+
+        .trailer-wrap iframe {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            border: none;
+        }
+
+        /* Add movie preview */
+        .add-preview { display: flex; gap: 16px; align-items: flex-start; }
+        .add-preview-poster { width: 72px; height: 108px; object-fit: cover; border-radius: 7px; background: #222; flex-shrink: 0; }
+        .add-preview-info h3 { font-size: 1rem; font-weight: 700; }
+        .add-preview-info p { font-size: 0.82rem; color: #777; margin: 3px 0 10px; }
+        .add-preview-info .overview { font-size: 0.82rem; color: #aaa; line-height: 1.5; }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            bottom: 28px;
+            right: 28px;
+            padding: 12px 20px;
+            border-radius: 9px;
+            font-size: 0.875rem;
+            font-weight: 600;
+            z-index: 9999;
+            animation: toastIn 0.28s ease;
+            pointer-events: none;
+        }
+
+        .toast-success { background: #14532d; border-left: 3px solid #4CAF50; }
+        .toast-error { background: #450a0a; border-left: 3px solid #e50914; }
+
+        @keyframes toastIn {
+            from { opacity: 0; transform: translateX(30px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar { width: 5px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
+
+        @media (max-width: 580px) {
+            .detail-body { flex-direction: column; }
+            .detail-poster-wrap { width: 110px; }
+            .movie-grid { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); gap: 14px; }
+        }
+    </style>
+</head>
+<body>
+
+<header>
+    <div class="header-title">Our <span>Movies</span></div>
+    <div class="header-right">
+        <span class="auth-status" id="authStatus"></span>
+        <button class="lock-btn" id="lockBtn" onclick="handleLockClick()" title="Lock / Unlock">🔒</button>
+    </div>
+</header>
+
+<main>
+    <!-- Search (only when unlocked) -->
+    <div class="search-section" id="searchSection" style="display:none">
+        <div class="search-wrapper">
+            <input
+                type="text"
+                class="search-input"
+                id="searchInput"
+                placeholder="Search for a movie to add..."
+                oninput="onSearchInput()"
+                autocomplete="off"
+            >
+            <button class="btn btn-gray" onclick="clearSearch()">Clear</button>
+        </div>
+        <div class="search-relative">
+            <div class="search-dropdown" id="searchDropdown" style="display:none"></div>
+        </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+        <button class="tab active" id="tab-towatch" onclick="switchTab('towatch')">To Watch</button>
+        <button class="tab" id="tab-watched" onclick="switchTab('watched')">Watched</button>
+    </div>
+
+    <!-- To Watch -->
+    <div id="section-towatch">
+        <div class="section-header">
+            <span class="section-count" id="count-towatch"></span>
+            <button class="btn-random" onclick="pickRandom()">🎲 Pick Random</button>
+        </div>
+        <div class="movie-grid" id="grid-towatch">
+            <div class="loading-state"><div class="spinner"></div></div>
+        </div>
+    </div>
+
+    <!-- Watched -->
+    <div id="section-watched" style="display:none">
+        <div class="section-header">
+            <span class="section-count" id="count-watched"></span>
+        </div>
+        <div class="movie-grid" id="grid-watched"></div>
+    </div>
+</main>
+
+<!-- PASSWORD MODAL -->
+<div class="modal-overlay" id="passwordModal" style="display:none">
+    <div class="modal">
+        <button class="modal-close" onclick="closePasswordModal()">×</button>
+        <div class="modal-title" id="pwModalTitle">Enter Password</div>
+
+        <div class="form-group">
+            <label class="form-label" id="pwLabel">Password</label>
+            <input type="password" class="form-input" id="pwInput" placeholder="••••••••" onkeydown="if(event.key==='Enter')submitPassword()">
+        </div>
+
+        <div id="changePwFields" style="display:none">
+            <div class="form-group">
+                <label class="form-label">New Password</label>
+                <input type="password" class="form-input" id="newPwInput" placeholder="New password">
+            </div>
+            <div class="form-group">
+                <label class="form-label">Confirm New Password</label>
+                <input type="password" class="form-input" id="confirmPwInput" placeholder="Confirm password">
+            </div>
+        </div>
+
+        <div class="form-error" id="pwError"></div>
+
+        <div class="form-actions">
+            <button class="btn btn-gray" onclick="closePasswordModal()">Cancel</button>
+            <button class="btn btn-red" id="pwSubmitBtn" onclick="submitPassword()">Unlock</button>
+        </div>
+
+        <div style="text-align:center;margin-top:16px">
+            <button id="changePwToggle" style="background:none;border:none;color:#444;font-size:0.8rem;cursor:pointer;text-decoration:underline" onclick="toggleChangePw()">Change password</button>
+        </div>
+    </div>
+</div>
+
+<!-- ADD MOVIE MODAL -->
+<div class="modal-overlay" id="addModal" style="display:none">
+    <div class="modal">
+        <button class="modal-close" onclick="closeAddModal()">×</button>
+        <div class="modal-title">Add to Watch List?</div>
+        <div id="addPreview"></div>
+        <div class="form-actions">
+            <button class="btn btn-gray" onclick="closeAddModal()">Cancel</button>
+            <button class="btn btn-red" onclick="confirmAdd()">Add Movie</button>
+        </div>
+    </div>
+</div>
+
+<!-- DETAIL MODAL -->
+<div class="modal-overlay" id="detailModal" style="display:none" onclick="handleDetailBg(event)">
+    <div class="modal modal-lg" onclick="event.stopPropagation()">
+        <button class="modal-close" onclick="closeDetail()">×</button>
+        <div id="detailBody"></div>
+        <div id="trailerSlot"></div>
+    </div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────
+// CONFIG
+// ─────────────────────────────────────────────
+const SUPABASE_URL  = 'https://kiwcyfscjomenhlheqvx.supabase.co';
+const SUPABASE_KEY  = 'sb_publishable_2HYE8Vc_p8sc7pe0Y1WHzA_LX336F11';
+const TMDB_KEY      = 'b0b8cc130921376671fb86afda7cbe2f';
+const TMDB_IMG_BASE = 'https://image.tmdb.org/t/p/w500';
+
+const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+// ─────────────────────────────────────────────
+// STATE
+// ─────────────────────────────────────────────
+let unlocked       = false;
+let movies         = [];
+let currentTab     = 'towatch';
+let pendingMovie   = null;
+let pwAction       = 'unlock';   // 'unlock' | 'change'
+let changePwMode   = false;
+let searchTimer    = null;
+let highlightId    = null;
+
+// ─────────────────────────────────────────────
+// INIT
+// ─────────────────────────────────────────────
+async function init() {
+    const { data, error } = await db.from('movies').select('*').order('added_at', { ascending: false });
+    if (!error) movies = data || [];
+    renderMovies();
+}
+
+// ─────────────────────────────────────────────
+// AUTH
+// ─────────────────────────────────────────────
+function handleLockClick() {
+    if (unlocked) { doLock(); } else { openPwModal('unlock'); }
+}
+
+function doLock() {
+    unlocked = false;
+    document.getElementById('lockBtn').textContent = '🔒';
+    document.getElementById('lockBtn').classList.remove('unlocked');
+    document.getElementById('authStatus').textContent = '';
+    document.getElementById('searchSection').style.display = 'none';
+    toast('Locked', 'success');
+    renderMovies();
+}
+
+function openPwModal(action) {
+    pwAction = action;
+    changePwMode = action === 'change';
+
+    document.getElementById('pwInput').value = '';
+    document.getElementById('newPwInput').value = '';
+    document.getElementById('confirmPwInput').value = '';
+    document.getElementById('pwError').style.display = 'none';
+
+    if (changePwMode) {
+        document.getElementById('pwModalTitle').textContent = 'Change Password';
+        document.getElementById('pwLabel').textContent = 'Current Password';
+        document.getElementById('changePwFields').style.display = 'block';
+        document.getElementById('pwSubmitBtn').textContent = 'Change Password';
+        document.getElementById('changePwToggle').style.display = 'none';
+    } else {
+        document.getElementById('pwModalTitle').textContent = 'Enter Password';
+        document.getElementById('pwLabel').textContent = 'Password';
+        document.getElementById('changePwFields').style.display = 'none';
+        document.getElementById('pwSubmitBtn').textContent = 'Unlock';
+        document.getElementById('changePwToggle').style.display = 'inline';
+    }
+
+    document.getElementById('passwordModal').style.display = 'flex';
+    setTimeout(() => document.getElementById('pwInput').focus(), 80);
+}
+
+function closePasswordModal() {
+    document.getElementById('passwordModal').style.display = 'none';
+    if (pwAction === 'unlock') pendingMovie = null;
+}
+
+function toggleChangePw() {
+    changePwMode = !changePwMode;
+    document.getElementById('changePwFields').style.display = changePwMode ? 'block' : 'none';
+    document.getElementById('pwSubmitBtn').textContent = changePwMode ? 'Change Password' : 'Unlock';
+}
+
+async function submitPassword() {
+    const pwErr = document.getElementById('pwError');
+    pwErr.style.display = 'none';
+
+    const entered = document.getElementById('pwInput').value;
+    if (!entered) { showErr(pwErr, 'Please enter the password'); return; }
+
+    const { data, error } = await db.from('settings').select('value').eq('key','password').single();
+    if (error) { showErr(pwErr, 'Database error'); return; }
+
+    if (entered !== data.value) { showErr(pwErr, 'Incorrect password'); return; }
+
+    if (changePwMode) {
+        const np = document.getElementById('newPwInput').value;
+        const cp = document.getElementById('confirmPwInput').value;
+        if (!np) { showErr(pwErr, 'New password cannot be empty'); return; }
+        if (np !== cp) { showErr(pwErr, 'Passwords do not match'); return; }
+        const { error: ue } = await db.from('settings').update({ value: np }).eq('key','password');
+        if (ue) { showErr(pwErr, 'Failed to update password'); return; }
+        toast('Password updated!', 'success');
+        closePasswordModal();
+        return;
+    }
+
+    // unlock
+    unlocked = true;
+    document.getElementById('lockBtn').textContent = '🔓';
+    document.getElementById('lockBtn').classList.add('unlocked');
+    document.getElementById('authStatus').textContent = 'Unlocked';
+    document.getElementById('searchSection').style.display = 'block';
+    closePasswordModal();
+    toast('Unlocked!', 'success');
+    renderMovies();
+
+    if (pendingMovie) { showAddModal(pendingMovie); pendingMovie = null; }
+}
+
+function showErr(el, msg) { el.textContent = msg; el.style.display = 'block'; }
+
+// ─────────────────────────────────────────────
+// DATABASE
+// ─────────────────────────────────────────────
+async function addMovie(m) {
+    const { data, error } = await db.from('movies').insert([{
+        tmdb_id:     m.tmdb_id,
+        title:       m.title,
+        year:        m.year,
+        poster_path: m.poster_path,
+        overview:    m.overview,
+        trailer_key: m.trailer_key,
+        watched:     false
+    }]).select().single();
+
+    if (error) {
+        toast(error.code === '23505' ? 'Already in your list!' : 'Failed to add movie', 'error');
+        return;
+    }
+    movies.unshift(data);
+    renderMovies();
+    toast(`"${m.title}" added!`, 'success');
+}
+
+async function toggleWatched(id) {
+    const m = movies.find(x => x.id === id);
+    if (!m) return;
+    const next = !m.watched;
+    const { error } = await db.from('movies').update({ watched: next }).eq('id', id);
+    if (error) { toast('Failed to update', 'error'); return; }
+    m.watched = next;
+    renderMovies();
+    toast(next ? 'Marked as watched!' : 'Moved back to watch list!', 'success');
+}
+
+async function removeMovie(id) {
+    const m = movies.find(x => x.id === id);
+    if (!confirm(`Remove "${m?.title}" from your list?`)) return;
+    const { error } = await db.from('movies').delete().eq('id', id);
+    if (error) { toast('Failed to remove', 'error'); return; }
+    movies = movies.filter(x => x.id !== id);
+    renderMovies();
+    closeDetail();
+    toast('Movie removed', 'success');
+}
+
+// ─────────────────────────────────────────────
+// TMDB
+// ─────────────────────────────────────────────
+async function tmdbSearch(q) {
+    const r = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(q)}&language=en-US&page=1`);
+    const d = await r.json();
+    return d.results || [];
+}
+
+async function tmdbTrailer(tmdbId) {
+    try {
+        const r = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/videos?api_key=${TMDB_KEY}&language=en-US`);
+        const d = await r.json();
+        const t = (d.results || []).find(v => v.type === 'Trailer' && v.site === 'YouTube');
+        return t ? t.key : null;
+    } catch { return null; }
+}
+
+// ─────────────────────────────────────────────
+// SEARCH UI
+// ─────────────────────────────────────────────
+function onSearchInput() {
+    clearTimeout(searchTimer);
+    const q = document.getElementById('searchInput').value.trim();
+    if (!q) { document.getElementById('searchDropdown').style.display = 'none'; return; }
+    searchTimer = setTimeout(async () => {
+        const results = await tmdbSearch(q);
+        renderDropdown(results);
+    }, 420);
+}
+
+function renderDropdown(results) {
+    const dd = document.getElementById('searchDropdown');
+    if (!results.length) {
+        dd.innerHTML = '<div style="padding:18px;color:#555;text-align:center;font-size:0.88rem">No results found</div>';
+        dd.style.display = 'block';
+        return;
+    }
+    dd.innerHTML = results.slice(0, 8).map(r => {
+        const year = r.release_date ? r.release_date.slice(0,4) : '';
+        const src  = r.poster_path ? `${TMDB_IMG_BASE}${r.poster_path}` : '';
+        const data = esc(JSON.stringify({ id: r.id, title: r.title, year, poster_path: r.poster_path||'', overview: r.overview||'' }));
+        return `
+        <div class="result-item" onclick="selectMovie(${data})">
+            ${src
+                ? `<img class="result-thumb" src="${src}" alt="">`
+                : `<div class="result-thumb" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎬</div>`}
+            <div class="result-info">
+                <h4>${escHtml(r.title)}</h4>
+                <p>${year || 'Unknown year'}</p>
+            </div>
+        </div>`;
+    }).join('');
+    dd.style.display = 'block';
+}
+
+async function selectMovie(raw) {
+    const r = typeof raw === 'string' ? JSON.parse(raw) : raw;
+    document.getElementById('searchDropdown').style.display = 'none';
+    document.getElementById('searchInput').value = '';
+
+    const trailerKey = await tmdbTrailer(r.id);
+
+    const movie = {
+        tmdb_id:     r.id,
+        title:       r.title,
+        year:        parseInt(r.year) || null,
+        poster_path: r.poster_path,
+        overview:    r.overview,
+        trailer_key: trailerKey
+    };
+
+    if (!unlocked) { pendingMovie = movie; openPwModal('unlock'); return; }
+    showAddModal(movie);
+}
+
+function clearSearch() {
+    document.getElementById('searchInput').value = '';
+    document.getElementById('searchDropdown').style.display = 'none';
+}
+
+// ─────────────────────────────────────────────
+// ADD MODAL
+// ─────────────────────────────────────────────
+function showAddModal(movie) {
+    pendingMovie = movie;
+    const src = movie.poster_path ? `${TMDB_IMG_BASE}${movie.poster_path}` : '';
+    const snippet = (movie.overview || '').length > 160
+        ? movie.overview.slice(0,160) + '…'
+        : (movie.overview || 'No description available.');
+
+    document.getElementById('addPreview').innerHTML = `
+        <div class="add-preview">
+            ${src
+                ? `<img class="add-preview-poster" src="${src}" alt="">`
+                : `<div class="add-preview-poster" style="display:flex;align-items:center;justify-content:center;font-size:2rem;border-radius:7px;background:#222">🎬</div>`}
+            <div class="add-preview-info">
+                <h3>${escHtml(movie.title)}</h3>
+                <p>${movie.year || 'Unknown year'}</p>
+                <div class="overview">${escHtml(snippet)}</div>
+            </div>
+        </div>`;
+    document.getElementById('addModal').style.display = 'flex';
+}
+
+async function confirmAdd() {
+    if (!pendingMovie) return;
+    await addMovie(pendingMovie);
+    closeAddModal();
+}
+
+function closeAddModal() {
+    document.getElementById('addModal').style.display = 'none';
+    pendingMovie = null;
+}
+
+// ─────────────────────────────────────────────
+// TABS
+// ─────────────────────────────────────────────
+function switchTab(tab) {
+    currentTab = tab;
+    document.getElementById('tab-towatch').classList.toggle('active', tab === 'towatch');
+    document.getElementById('tab-watched').classList.toggle('active', tab === 'watched');
+    document.getElementById('section-towatch').style.display = tab === 'towatch' ? 'block' : 'none';
+    document.getElementById('section-watched').style.display = tab === 'watched'  ? 'block' : 'none';
+}
+
+// ─────────────────────────────────────────────
+// RENDER
+// ─────────────────────────────────────────────
+function renderMovies() {
+    const towatch = movies.filter(m => !m.watched);
+    const watched  = movies.filter(m =>  m.watched);
+
+    document.getElementById('count-towatch').textContent = `${towatch.length} movie${towatch.length !== 1 ? 's' : ''} to watch`;
+    document.getElementById('count-watched').textContent  = `${watched.length} movie${watched.length !== 1 ? 's' : ''} watched`;
+
+    renderGrid('grid-towatch', towatch);
+    renderGrid('grid-watched', watched);
+}
+
+function renderGrid(gridId, list) {
+    const grid = document.getElementById(gridId);
+
+    if (!list.length) {
+        grid.innerHTML = `<div class="empty-state"><div class="ei">🎬</div><p>Nothing here yet</p></div>`;
+        return;
+    }
+
+    grid.innerHTML = list.map(m => {
+        const src = m.poster_path ? `${TMDB_IMG_BASE}${m.poster_path}` : '';
+        const hi  = m.id === highlightId ? 'highlight-card' : '';
+        return `
+        <div class="movie-card ${hi}" onclick="openDetail('${m.id}')">
+            <div class="poster-wrapper">
+                ${src
+                    ? `<img class="movie-poster" src="${src}" alt="${escHtml(m.title)}" loading="lazy">`
+                    : `<div class="poster-placeholder">🎬</div>`}
+                ${m.watched ? '<div class="watched-badge">✓</div>' : ''}
+                <div class="card-overlay">
+                    <button class="ov-btn" onclick="event.stopPropagation();openDetail('${m.id}')">Info</button>
+                    ${unlocked ? `<button class="ov-btn green" onclick="event.stopPropagation();toggleWatched('${m.id}')">${m.watched ? 'Unwatch' : 'Watched'}</button>` : ''}
+                </div>
+            </div>
+            <div class="movie-info">
+                <div class="movie-title" title="${escHtml(m.title)}">${escHtml(m.title)}</div>
+                <div class="movie-year">${m.year || ''}</div>
+            </div>
+        </div>`;
+    }).join('');
+}
+
+// ─────────────────────────────────────────────
+// DETAIL MODAL
+// ─────────────────────────────────────────────
+function openDetail(id) {
+    const m = movies.find(x => x.id === id);
+    if (!m) return;
+
+    const src = m.poster_path ? `${TMDB_IMG_BASE}${m.poster_path}` : '';
+
+    document.getElementById('detailBody').innerHTML = `
+        <div class="detail-body">
+            <div class="detail-poster-wrap">
+                ${src
+                    ? `<img src="${src}" alt="${escHtml(m.title)}">`
+                    : `<div class="no-poster">🎬</div>`}
+            </div>
+            <div class="detail-info">
+                <div class="detail-title">${escHtml(m.title)}</div>
+                <div class="detail-year">${m.year || 'Unknown year'}</div>
+                <div class="detail-overview">${escHtml(m.overview || 'No description available.')}</div>
+                <div class="detail-actions">
+                    ${m.trailer_key
+                        ? `<button class="btn btn-red" onclick="playTrailer('${m.trailer_key}')">▶ Trailer</button>`
+                        : `<button class="btn btn-gray" id="findTrailerBtn" onclick="findTrailer(${m.tmdb_id},'${m.id}')">Find Trailer</button>`}
+                    ${unlocked ? `
+                        <button class="btn btn-gray" onclick="toggleWatched('${m.id}');closeDetail()">
+                            ${m.watched ? '↩ Unwatch' : '✓ Mark Watched'}
+                        </button>
+                        <button class="btn btn-outline" onclick="removeMovie('${m.id}')">Remove</button>
+                    ` : ''}
+                </div>
+            </div>
+        </div>`;
+
+    document.getElementById('trailerSlot').innerHTML = '';
+    document.getElementById('detailModal').style.display = 'flex';
+}
+
+function playTrailer(key) {
+    document.getElementById('trailerSlot').innerHTML = `
+        <div class="trailer-wrap">
+            <iframe src="https://www.youtube.com/embed/${key}?autoplay=1" allowfullscreen allow="autoplay; encrypted-media"></iframe>
+        </div>`;
+}
+
+async function findTrailer(tmdbId, movieId) {
+    const btn = document.getElementById('findTrailerBtn');
+    if (btn) { btn.textContent = 'Searching…'; btn.disabled = true; }
+    const key = await tmdbTrailer(tmdbId);
+    if (key) {
+        await db.from('movies').update({ trailer_key: key }).eq('id', movieId);
+        const m = movies.find(x => x.id === movieId);
+        if (m) m.trailer_key = key;
+        playTrailer(key);
+    } else {
+        if (btn) { btn.textContent = 'No trailer found'; }
+    }
+}
+
+function closeDetail() {
+    document.getElementById('detailModal').style.display = 'none';
+    document.getElementById('trailerSlot').innerHTML = '';
+}
+
+function handleDetailBg(e) {
+    if (e.target === document.getElementById('detailModal')) closeDetail();
+}
+
+// ─────────────────────────────────────────────
+// RANDOM PICK
+// ─────────────────────────────────────────────
+function pickRandom() {
+    const pool = movies.filter(m => !m.watched);
+    if (!pool.length) { toast('No movies left to watch!', 'error'); return; }
+
+    const pick = pool[Math.floor(Math.random() * pool.length)];
+    highlightId = pick.id;
+    renderMovies();
+
+    setTimeout(() => {
+        document.querySelector('.highlight-card')?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        openDetail(pick.id);
+    }, 250);
+
+    setTimeout(() => { highlightId = null; renderMovies(); }, 6000);
+}
+
+// ─────────────────────────────────────────────
+// UTILS
+// ─────────────────────────────────────────────
+function escHtml(s) {
+    return (s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+function esc(s) {
+    return (s||'').replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+}
+
+function toast(msg, type) {
+    document.querySelector('.toast')?.remove();
+    const el = Object.assign(document.createElement('div'), { className: `toast toast-${type}`, textContent: msg });
+    document.body.appendChild(el);
+    setTimeout(() => el.remove(), 3200);
+}
+
+// Close search on outside click
+document.addEventListener('click', e => {
+    if (!e.target.closest('.search-section'))
+        document.getElementById('searchDropdown').style.display = 'none';
+});
+
+// ─────────────────────────────────────────────
+// START
+// ─────────────────────────────────────────────
+init();
+</script>
+</body>
+</html>
