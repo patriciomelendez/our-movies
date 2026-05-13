@@ -487,6 +487,8 @@
             .modal-lg { max-height: 90vh; overflow-y: auto; }
             .movie-grid { grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: 12px; }
             .movie-title { font-size: 0.78rem; }
+            /* Hide hover overlay on mobile — use detail modal instead */
+            .card-overlay { display: none !important; }
         }
 
         @media (max-width: 380px) {
@@ -525,15 +527,16 @@
 
     <!-- Tabs -->
     <div class="tabs">
-        <button class="tab active" id="tab-towatch" onclick="switchTab('towatch')">To Watch</button>
-        <button class="tab" id="tab-watched" onclick="switchTab('watched')">Watched</button>
+        <button class="tab active" id="tab-towatch" onclick="switchTab('towatch')">🎬 To Watch</button>
+        <button class="tab" id="tab-watched" onclick="switchTab('watched')">✅ Watched</button>
+        <button class="tab" id="tab-tvshows" onclick="switchTab('tvshows')">📺 TV Shows</button>
     </div>
 
     <!-- To Watch -->
     <div id="section-towatch">
         <div class="section-header">
             <span class="section-count" id="count-towatch"></span>
-            <button class="btn-random" onclick="pickRandom()">🎲 Pick Random</button>
+            <button class="btn-random" onclick="pickRandom('movie')">🎲 Pick Random</button>
         </div>
         <div class="movie-grid" id="grid-towatch">
             <div class="loading-state"><div class="spinner"></div></div>
@@ -546,6 +549,23 @@
             <span class="section-count" id="count-watched"></span>
         </div>
         <div class="movie-grid" id="grid-watched"></div>
+    </div>
+
+    <!-- TV Shows -->
+    <div id="section-tvshows" style="display:none">
+        <div class="section-header">
+            <span class="section-count" id="count-tvshows-watch"></span>
+            <button class="btn-random" onclick="pickRandom('tv')">🎲 Pick Random</button>
+        </div>
+        <div class="movie-grid" id="grid-tvshows-towatch">
+            <div class="loading-state"><div class="spinner"></div></div>
+        </div>
+        <div style="margin-top:32px">
+            <div class="section-header">
+                <span class="section-count" id="count-tvshows-watched"></span>
+            </div>
+            <div class="movie-grid" id="grid-tvshows-watched"></div>
+        </div>
     </div>
 </main>
 
@@ -744,6 +764,7 @@ async function addMovie(m) {
         poster_path: m.poster_path,
         overview:    m.overview,
         trailer_key: m.trailer_key,
+        media_type:  m.media_type || 'movie',
         watched:     false
     }]).select().single();
 
@@ -787,9 +808,16 @@ async function tmdbSearch(q) {
     return d.results || [];
 }
 
-async function tmdbTrailer(tmdbId) {
+async function tmdbTvSearch(q) {
+    const r = await fetch(`https://api.themoviedb.org/3/search/tv?api_key=${TMDB_KEY}&query=${encodeURIComponent(q)}&language=en-US&page=1`);
+    const d = await r.json();
+    return d.results || [];
+}
+
+async function tmdbTrailer(tmdbId, mediaType) {
     try {
-        const r = await fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/videos?api_key=${TMDB_KEY}&language=en-US`);
+        const endpoint = mediaType === 'tv' ? 'tv' : 'movie';
+        const r = await fetch(`https://api.themoviedb.org/3/${endpoint}/${tmdbId}/videos?api_key=${TMDB_KEY}&language=en-US`);
         const d = await r.json();
         const t = (d.results || []).find(v => v.type === 'Trailer' && v.site === 'YouTube');
         return t ? t.key : null;
@@ -804,12 +832,13 @@ function onSearchInput() {
     const q = document.getElementById('searchInput').value.trim();
     if (!q) { document.getElementById('searchDropdown').style.display = 'none'; return; }
     searchTimer = setTimeout(async () => {
-        const results = await tmdbSearch(q);
-        renderDropdown(results);
+        const isTv = currentTab === 'tvshows';
+        const results = isTv ? await tmdbTvSearch(q) : await tmdbSearch(q);
+        renderDropdown(results, isTv);
     }, 420);
 }
 
-function renderDropdown(results) {
+function renderDropdown(results, isTv) {
     const dd = document.getElementById('searchDropdown');
     searchResults = results.slice(0, 8);
 
@@ -819,15 +848,17 @@ function renderDropdown(results) {
         return;
     }
     dd.innerHTML = searchResults.map((r, i) => {
-        const year = r.release_date ? r.release_date.slice(0,4) : '';
-        const src  = r.poster_path ? `${TMDB_IMG_BASE}${r.poster_path}` : '';
+        const title = isTv ? r.name : r.title;
+        const date  = isTv ? r.first_air_date : r.release_date;
+        const year  = date ? date.slice(0,4) : '';
+        const src   = r.poster_path ? `${TMDB_IMG_BASE}${r.poster_path}` : '';
         return `
-        <div class="result-item" onclick="selectMovie(${i})">
+        <div class="result-item" onclick="selectResult(${i})">
             ${src
                 ? `<img class="result-thumb" src="${src}" alt="">`
-                : `<div class="result-thumb" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">🎬</div>`}
+                : `<div class="result-thumb" style="display:flex;align-items:center;justify-content:center;font-size:1.4rem">${isTv ? '📺' : '🎬'}</div>`}
             <div class="result-info">
-                <h4>${escHtml(r.title)}</h4>
+                <h4>${escHtml(title)}</h4>
                 <p>${year || 'Unknown year'}</p>
             </div>
         </div>`;
@@ -835,26 +866,30 @@ function renderDropdown(results) {
     dd.style.display = 'block';
 }
 
-async function selectMovie(index) {
+async function selectResult(index) {
     const r = searchResults[index];
     if (!r) return;
 
+    const isTv = currentTab === 'tvshows';
     document.getElementById('searchDropdown').style.display = 'none';
     document.getElementById('searchInput').value = '';
 
-    const trailerKey = await tmdbTrailer(r.id);
+    const trailerKey = await tmdbTrailer(r.id, isTv ? 'tv' : 'movie');
+    const title = isTv ? r.name : r.title;
+    const date  = isTv ? r.first_air_date : r.release_date;
 
-    const movie = {
-        tmdb_id:     r.id,
-        title:       r.title,
-        year:        r.release_date ? parseInt(r.release_date.slice(0,4)) : null,
+    const item = {
+        tmdb_id:    r.id,
+        title:      title,
+        year:       date ? parseInt(date.slice(0,4)) : null,
         poster_path: r.poster_path || '',
-        overview:    r.overview || '',
-        trailer_key: trailerKey
+        overview:   r.overview || '',
+        trailer_key: trailerKey,
+        media_type: isTv ? 'tv' : 'movie'
     };
 
-    if (!unlocked) { pendingMovie = movie; openPwModal('unlock'); return; }
-    showAddModal(movie);
+    if (!unlocked) { pendingMovie = item; openPwModal('unlock'); return; }
+    showAddModal(item);
 }
 
 function clearSearch() {
@@ -902,24 +937,35 @@ function closeAddModal() {
 // ─────────────────────────────────────────────
 function switchTab(tab) {
     currentTab = tab;
-    document.getElementById('tab-towatch').classList.toggle('active', tab === 'towatch');
-    document.getElementById('tab-watched').classList.toggle('active', tab === 'watched');
-    document.getElementById('section-towatch').style.display = tab === 'towatch' ? 'block' : 'none';
-    document.getElementById('section-watched').style.display = tab === 'watched'  ? 'block' : 'none';
+    ['towatch','watched','tvshows'].forEach(t => {
+        document.getElementById(`tab-${t}`).classList.toggle('active', t === tab);
+        document.getElementById(`section-${t}`).style.display = t === tab ? 'block' : 'none';
+    });
+    const placeholder = tab === 'tvshows' ? 'Search for a TV show to add...' : 'Search for a movie to add...';
+    document.getElementById('searchInput').placeholder = placeholder;
 }
 
 // ─────────────────────────────────────────────
 // RENDER
 // ─────────────────────────────────────────────
 function renderMovies() {
-    const towatch = movies.filter(m => !m.watched);
-    const watched  = movies.filter(m =>  m.watched);
+    const films      = movies.filter(m => m.media_type !== 'tv');
+    const tvs        = movies.filter(m => m.media_type === 'tv');
 
-    document.getElementById('count-towatch').textContent = `${towatch.length} movie${towatch.length !== 1 ? 's' : ''} to watch`;
-    document.getElementById('count-watched').textContent  = `${watched.length} movie${watched.length !== 1 ? 's' : ''} watched`;
+    const towatch    = films.filter(m => !m.watched);
+    const watched    = films.filter(m =>  m.watched);
+    const tvTowatch  = tvs.filter(m => !m.watched);
+    const tvWatched  = tvs.filter(m =>  m.watched);
+
+    document.getElementById('count-towatch').textContent        = `${towatch.length} movie${towatch.length !== 1 ? 's' : ''} to watch`;
+    document.getElementById('count-watched').textContent        = `${watched.length} movie${watched.length !== 1 ? 's' : ''} watched`;
+    document.getElementById('count-tvshows-watch').textContent  = `${tvTowatch.length} show${tvTowatch.length !== 1 ? 's' : ''} to watch`;
+    document.getElementById('count-tvshows-watched').textContent = `${tvWatched.length} show${tvWatched.length !== 1 ? 's' : ''} watched`;
 
     renderGrid('grid-towatch', towatch);
     renderGrid('grid-watched', watched);
+    renderGrid('grid-tvshows-towatch', tvTowatch);
+    renderGrid('grid-tvshows-watched', tvWatched);
 }
 
 function renderGrid(gridId, list) {
@@ -1002,10 +1048,10 @@ function playTrailer(key) {
 async function findTrailer(tmdbId, movieId) {
     const btn = document.getElementById('findTrailerBtn');
     if (btn) { btn.textContent = 'Searching…'; btn.disabled = true; }
-    const key = await tmdbTrailer(tmdbId);
+    const m = movies.find(x => x.id === movieId);
+    const key = await tmdbTrailer(tmdbId, m?.media_type);
     if (key) {
         await db.from('movies').update({ trailer_key: key }).eq('id', movieId);
-        const m = movies.find(x => x.id === movieId);
         if (m) m.trailer_key = key;
         playTrailer(key);
     } else {
@@ -1025,9 +1071,10 @@ function handleDetailBg(e) {
 // ─────────────────────────────────────────────
 // RANDOM PICK
 // ─────────────────────────────────────────────
-function pickRandom() {
-    const pool = movies.filter(m => !m.watched);
-    if (!pool.length) { toast('No movies left to watch!', 'error'); return; }
+function pickRandom(type) {
+    const pool = movies.filter(m => !m.watched && (type === 'tv' ? m.media_type === 'tv' : m.media_type !== 'tv'));
+    const label = type === 'tv' ? 'shows' : 'movies';
+    if (!pool.length) { toast(`No ${label} left to watch!`, 'error'); return; }
 
     const pick = pool[Math.floor(Math.random() * pool.length)];
     highlightId = pick.id;
