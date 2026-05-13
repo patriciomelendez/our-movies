@@ -647,9 +647,22 @@ let searchResults  = [];
 // ─────────────────────────────────────────────
 // INIT
 // ─────────────────────────────────────────────
+const UNLOCK_DURATION = 10 * 60 * 1000; // 10 minutes
+
 async function init() {
     const { data, error } = await db.from('movies').select('*').order('added_at', { ascending: false });
     if (!error) movies = data || [];
+
+    // Auto-unlock if unlocked within the last 10 minutes
+    const unlockedAt = parseInt(localStorage.getItem('unlockedAt') || '0');
+    if (Date.now() - unlockedAt < UNLOCK_DURATION) {
+        unlocked = true;
+        document.getElementById('lockBtn').innerHTML = '🔓 Lock';
+        document.getElementById('lockBtn').classList.add('unlocked');
+        document.getElementById('authStatus').textContent = 'Unlocked';
+        document.getElementById('searchSection').style.display = 'block';
+    }
+
     renderMovies();
 }
 
@@ -662,6 +675,7 @@ function handleLockClick() {
 
 function doLock() {
     unlocked = false;
+    localStorage.removeItem('unlockedAt');
     document.getElementById('lockBtn').innerHTML = '🔒 Unlock';
     document.getElementById('lockBtn').classList.remove('unlocked');
     document.getElementById('authStatus').textContent = '';
@@ -734,6 +748,7 @@ async function submitPassword() {
 
     // unlock
     unlocked = true;
+    localStorage.setItem('unlockedAt', Date.now().toString());
     document.getElementById('lockBtn').innerHTML = '🔓 Lock';
     document.getElementById('lockBtn').classList.add('unlocked');
     document.getElementById('authStatus').textContent = 'Unlocked';
