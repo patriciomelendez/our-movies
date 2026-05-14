@@ -1118,6 +1118,22 @@ document.addEventListener('click', e => {
         document.getElementById('searchDropdown').style.display = 'none';
 });
 
+// Swipe between tabs on mobile
+const TAB_ORDER = ['towatch', 'tvshows', 'watched'];
+let swipeStartX = 0;
+
+document.addEventListener('touchstart', e => {
+    swipeStartX = e.touches[0].clientX;
+}, { passive: true });
+
+document.addEventListener('touchend', e => {
+    const dx = e.changedTouches[0].clientX - swipeStartX;
+    if (Math.abs(dx) < 50) return; // too short
+    const idx = TAB_ORDER.indexOf(currentTab);
+    if (dx < 0 && idx < TAB_ORDER.length - 1) switchTab(TAB_ORDER[idx + 1]); // swipe left → next
+    if (dx > 0 && idx > 0) switchTab(TAB_ORDER[idx - 1]);                     // swipe right → prev
+}, { passive: true });
+
 // ─────────────────────────────────────────────
 // START
 // ─────────────────────────────────────────────
