@@ -593,8 +593,9 @@
             <button class="btn btn-red" id="pwSubmitBtn" onclick="submitPassword()">Unlock</button>
         </div>
 
-        <div style="text-align:center;margin-top:16px">
+        <div style="text-align:center;margin-top:16px;display:flex;flex-direction:column;gap:8px">
             <button id="changePwToggle" style="background:none;border:none;color:#444;font-size:0.8rem;cursor:pointer;text-decoration:underline" onclick="toggleChangePw()">Change password</button>
+            <button id="biometricSetupBtn" style="background:none;border:none;color:#444;font-size:0.8rem;cursor:pointer;text-decoration:underline" onclick="setupBiometric()">🔑 Set up Touch ID / Face ID</button>
         </div>
     </div>
 </div>
@@ -665,13 +666,49 @@ async function init() {
     }
 
     renderMovies();
+
+    // Update biometric button label if modal is opened later
+    if (localStorage.getItem('biometricEnabled')) {
+        const btn = document.getElementById('biometricSetupBtn');
+        if (btn) btn.textContent = '❌ Remove Touch ID / Face ID';
+    }
+}
+
+function offerBiometricSetup() {
+    // Show a small banner offering biometric setup
+    const existing = document.getElementById('biometricBanner');
+    if (existing) return;
+    const banner = document.createElement('div');
+    banner.id = 'biometricBanner';
+    banner.style.cssText = 'position:fixed;bottom:80px;right:24px;background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:16px 20px;z-index:9000;max-width:280px;box-shadow:0 8px 32px rgba(0,0,0,0.6)';
+    banner.innerHTML = `
+        <div style="font-weight:700;margin-bottom:6px">🔑 Set up Touch ID / Face ID?</div>
+        <div style="font-size:0.82rem;color:#888;margin-bottom:14px">Unlock without typing your password next time.</div>
+        <div style="display:flex;gap:8px">
+            <button onclick="setupBiometric();document.getElementById('biometricBanner').remove()" style="flex:1;padding:8px;background:#e50914;border:none;color:white;border-radius:8px;font-weight:700;cursor:pointer">Set up</button>
+            <button onclick="document.getElementById('biometricBanner').remove()" style="flex:1;padding:8px;background:#2a2a2a;border:none;color:#ccc;border-radius:8px;font-weight:700;cursor:pointer">Not now</button>
+        </div>`;
+    document.body.appendChild(banner);
+    setTimeout(() => banner?.remove(), 15000);
 }
 
 // ─────────────────────────────────────────────
 // AUTH
 // ─────────────────────────────────────────────
 function handleLockClick() {
-    if (unlocked) { doLock(); } else { openPwModal('unlock'); }
+    if (unlocked) { doLock(); return; }
+    // Try biometric first, fall back to password
+    tryBiometric().then(ok => { if (!ok) openPwModal('unlock'); });
+}
+
+function doUnlock() {
+    unlocked = true;
+    localStorage.setItem('unlockedAt', Date.now().toString());
+    document.getElementById('lockBtn').innerHTML = '🔓 Lock';
+    document.getElementById('lockBtn').classList.add('unlocked');
+    document.getElementById('authStatus').textContent = 'Unlocked';
+    document.getElementById('searchSection').style.display = 'block';
+    renderMovies();
 }
 
 function doLock() {
@@ -683,6 +720,83 @@ function doLock() {
     document.getElementById('searchSection').style.display = 'none';
     toast('Locked', 'success');
     renderMovies();
+}
+
+// ─────────────────────────────────────────────
+// BIOMETRICS (WebAuthn)
+// ─────────────────────────────────────────────
+const WA_RP_ID = window.location.hostname;
+
+async function isBiometricAvailable() {
+    try {
+        return !!(window.PublicKeyCredential &&
+            await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable());
+    } catch { return false; }
+}
+
+async function tryBiometric() {
+    if (!localStorage.getItem('biometricEnabled')) return false;
+    if (!await isBiometricAvailable()) return false;
+    try {
+        const stored = localStorage.getItem('waCredId');
+        if (!stored) return false;
+        const credId = Uint8Array.from(atob(stored), c => c.charCodeAt(0));
+        const assertion = await navigator.credentials.get({
+            publicKey: {
+                challenge: crypto.getRandomValues(new Uint8Array(32)),
+                rpId: WA_RP_ID,
+                allowCredentials: [{ id: credId, type: 'public-key', transports: ['internal'] }],
+                userVerification: 'required',
+                timeout: 60000
+            }
+        });
+        if (assertion) { doUnlock(); toast('Unlocked!', 'success'); return true; }
+    } catch(e) { /* user cancelled or failed — fall through to password */ }
+    return false;
+}
+
+async function setupBiometric() {
+    const btn = document.getElementById('biometricSetupBtn');
+    if (!await isBiometricAvailable()) {
+        toast('Biometrics not supported on this browser', 'error'); return;
+    }
+    // If already enabled, disable it
+    if (localStorage.getItem('biometricEnabled')) {
+        localStorage.removeItem('waCredId');
+        localStorage.removeItem('biometricEnabled');
+        if (btn) btn.textContent = '🔑 Set up Touch ID / Face ID';
+        toast('Biometrics removed', 'success'); return;
+    }
+    try {
+        const cred = await navigator.credentials.create({
+            publicKey: {
+                challenge: crypto.getRandomValues(new Uint8Array(32)),
+                rp: { name: 'Our Movies', id: WA_RP_ID },
+                user: {
+                    id: new TextEncoder().encode('our-movies-user'),
+                    name: 'user',
+                    displayName: 'Movie Watcher'
+                },
+                pubKeyCredParams: [
+                    { alg: -7, type: 'public-key' },
+                    { alg: -257, type: 'public-key' }
+                ],
+                authenticatorSelection: {
+                    authenticatorAttachment: 'platform',
+                    userVerification: 'required',
+                    residentKey: 'preferred'
+                },
+                attestation: 'none',
+                timeout: 60000
+            }
+        });
+        localStorage.setItem('waCredId', btoa(String.fromCharCode(...new Uint8Array(cred.rawId))));
+        localStorage.setItem('biometricEnabled', '1');
+        if (btn) btn.textContent = '❌ Remove Touch ID / Face ID';
+        toast('Touch ID / Face ID enabled! ✓', 'success');
+    } catch(e) {
+        if (e.name !== 'NotAllowedError') toast('Could not enable biometrics', 'error');
+    }
 }
 
 function openPwModal(action) {
@@ -748,15 +862,16 @@ async function submitPassword() {
     }
 
     // unlock
-    unlocked = true;
-    localStorage.setItem('unlockedAt', Date.now().toString());
-    document.getElementById('lockBtn').innerHTML = '🔓 Lock';
-    document.getElementById('lockBtn').classList.add('unlocked');
-    document.getElementById('authStatus').textContent = 'Unlocked';
-    document.getElementById('searchSection').style.display = 'block';
+    doUnlock();
     closePasswordModal();
     toast('Unlocked!', 'success');
-    renderMovies();
+
+    // Offer biometric setup if available and not yet configured
+    isBiometricAvailable().then(available => {
+        if (available && !localStorage.getItem('biometricEnabled')) {
+            offerBiometricSetup();
+        }
+    });
 
     if (pendingMovie) { showAddModal(pendingMovie); pendingMovie = null; }
 }
