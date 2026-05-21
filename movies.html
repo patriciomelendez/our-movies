@@ -1167,7 +1167,6 @@ function movieCardHTML(m) {
         <div class="movie-info">
             <div class="movie-title" title="${escHtml(m.title)}">${escHtml(m.title)}</div>
             <div class="movie-year">${m.year || ''}</div>
-            ${watchedDay ? `<div class="watched-date">Watched ${watchedDay}</div>` : ''}
         </div>
     </div>`;
 }
