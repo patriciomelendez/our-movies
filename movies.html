@@ -468,6 +468,24 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
 
+        /* Month groups in Watched tab */
+        .month-group { margin-bottom: 36px; }
+        .month-label {
+            font-size: 0.78rem;
+            font-weight: 800;
+            color: #444;
+            text-transform: uppercase;
+            letter-spacing: 1.5px;
+            margin-bottom: 16px;
+            padding-bottom: 10px;
+            border-bottom: 1px solid #1e1e1e;
+        }
+        .watched-date {
+            font-size: 0.72rem;
+            color: #555;
+            margin-top: 3px;
+        }
+
         /* Responsive */
         @media (max-width: 768px) {
             header { padding: 12px 16px; }
@@ -560,7 +578,7 @@
         <div class="section-header">
             <span class="section-count" id="count-watched"></span>
         </div>
-        <div class="movie-grid" id="grid-watched"></div>
+        <div id="grid-watched"></div>
     </div>
 </main>
 
@@ -906,9 +924,11 @@ async function toggleWatched(id) {
     const m = movies.find(x => x.id === id);
     if (!m) return;
     const next = !m.watched;
-    const { error } = await db.from('movies').update({ watched: next }).eq('id', id);
+    const watchedAt = next ? new Date().toISOString() : null;
+    const { error } = await db.from('movies').update({ watched: next, watched_at: watchedAt }).eq('id', id);
     if (error) { toast('Failed to update', 'error'); return; }
     m.watched = next;
+    m.watched_at = watchedAt;
     renderMovies();
     toast(next ? 'Marked as watched!' : 'Moved back to watch list!', 'success');
 }
@@ -1087,39 +1107,78 @@ function renderMovies() {
 
     renderGrid('grid-towatch', towatch);
     renderGrid('grid-tvshows-towatch', tvTowatch);
-    renderGrid('grid-watched', allWatched);
+    renderWatchedByMonth(allWatched);
+}
+
+function renderWatchedByMonth(list) {
+    const container = document.getElementById('grid-watched');
+    if (!list.length) {
+        container.innerHTML = `<div class="empty-state"><div class="ei">🎬</div><p>Nothing watched yet</p></div>`;
+        return;
+    }
+
+    // Sort newest watched_at first
+    const sorted = [...list].sort((a, b) => {
+        const da = a.watched_at ? new Date(a.watched_at) : new Date(0);
+        const db_ = b.watched_at ? new Date(b.watched_at) : new Date(0);
+        return db_ - da;
+    });
+
+    // Group by "Month Year"
+    const groups = {};
+    sorted.forEach(m => {
+        const d = m.watched_at ? new Date(m.watched_at) : null;
+        const key = d
+            ? d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })
+            : 'Unknown date';
+        if (!groups[key]) groups[key] = [];
+        groups[key].push(m);
+    });
+
+    container.innerHTML = Object.entries(groups).map(([month, items]) => `
+        <div class="month-group">
+            <div class="month-label">${month}</div>
+            <div class="movie-grid">
+                ${items.map(m => movieCardHTML(m)).join('')}
+            </div>
+        </div>
+    `).join('');
+}
+
+function movieCardHTML(m) {
+    const src = m.poster_path ? `${TMDB_IMG_BASE}${m.poster_path}` : '';
+    const hi  = m.id === highlightId ? 'highlight-card' : '';
+    const watchedDay = m.watched && m.watched_at
+        ? new Date(m.watched_at).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+        : '';
+    return `
+    <div class="movie-card ${hi}" onclick="openDetail('${m.id}')">
+        <div class="poster-wrapper">
+            ${src
+                ? `<img class="movie-poster" src="${src}" alt="${escHtml(m.title)}" loading="lazy">`
+                : `<div class="poster-placeholder">🎬</div>`}
+            ${m.watched ? '<div class="watched-badge">✓</div>' : ''}
+            <div class="card-overlay">
+                <button class="ov-btn" onclick="event.stopPropagation();openDetail('${m.id}')">Info</button>
+                ${unlocked ? `<button class="ov-btn green" onclick="event.stopPropagation();toggleWatched('${m.id}')">${m.watched ? 'Unwatch' : 'Watched'}</button>` : ''}
+                ${unlocked ? `<button class="ov-btn red" onclick="event.stopPropagation();removeMovie('${m.id}')">🗑</button>` : ''}
+            </div>
+        </div>
+        <div class="movie-info">
+            <div class="movie-title" title="${escHtml(m.title)}">${escHtml(m.title)}</div>
+            <div class="movie-year">${m.year || ''}</div>
+            ${watchedDay ? `<div class="watched-date">Watched ${watchedDay}</div>` : ''}
+        </div>
+    </div>`;
 }
 
 function renderGrid(gridId, list) {
     const grid = document.getElementById(gridId);
-
     if (!list.length) {
         grid.innerHTML = `<div class="empty-state"><div class="ei">🎬</div><p>Nothing here yet</p></div>`;
         return;
     }
-
-    grid.innerHTML = list.map(m => {
-        const src = m.poster_path ? `${TMDB_IMG_BASE}${m.poster_path}` : '';
-        const hi  = m.id === highlightId ? 'highlight-card' : '';
-        return `
-        <div class="movie-card ${hi}" onclick="openDetail('${m.id}')">
-            <div class="poster-wrapper">
-                ${src
-                    ? `<img class="movie-poster" src="${src}" alt="${escHtml(m.title)}" loading="lazy">`
-                    : `<div class="poster-placeholder">🎬</div>`}
-                ${m.watched ? '<div class="watched-badge">✓</div>' : ''}
-                <div class="card-overlay">
-                    <button class="ov-btn" onclick="event.stopPropagation();openDetail('${m.id}')">Info</button>
-                    ${unlocked ? `<button class="ov-btn green" onclick="event.stopPropagation();toggleWatched('${m.id}')">${m.watched ? 'Unwatch' : 'Watched'}</button>` : ''}
-                    ${unlocked ? `<button class="ov-btn red" onclick="event.stopPropagation();removeMovie('${m.id}')">🗑</button>` : ''}
-                </div>
-            </div>
-            <div class="movie-info">
-                <div class="movie-title" title="${escHtml(m.title)}">${escHtml(m.title)}</div>
-                <div class="movie-year">${m.year || ''}</div>
-            </div>
-        </div>`;
-    }).join('');
+    grid.innerHTML = list.map(m => movieCardHTML(m)).join('');
 }
 
 // ─────────────────────────────────────────────
@@ -1140,7 +1199,7 @@ function openDetail(id) {
             </div>
             <div class="detail-info">
                 <div class="detail-title">${escHtml(m.title)}</div>
-                <div class="detail-year">${m.year || 'Unknown year'}</div>
+                <div class="detail-year">${m.year || 'Unknown year'}${m.watched && m.watched_at ? ` &nbsp;·&nbsp; <span style="color:#4CAF50;font-size:0.82rem">Watched ${new Date(m.watched_at).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</span>` : ''}</div>
                 <div class="detail-overview">${escHtml(m.overview || 'No description available.')}</div>
                 <div class="detail-actions">
                     ${m.trailer_key
