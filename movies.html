@@ -1195,7 +1195,7 @@ function renderMovies() {
     const allTowatch = films.filter(m => !m.watched);
     const towatch    = locationFilter === 'any'
         ? allTowatch
-        : allTowatch.filter(m => m.location === locationFilter || m.location === 'any');
+        : allTowatch.filter(m => m.location === locationFilter);
     const tvTowatch  = tvs.filter(m => !m.watched);
 
     document.getElementById('count-towatch').textContent       = `${towatch.length} movie${towatch.length !== 1 ? 's' : ''} to watch`;
@@ -1361,7 +1361,7 @@ function setLocationFilter(loc) {
 function pickRandom(type) {
     let pool = movies.filter(m => !m.watched && (type === 'tv' ? m.media_type === 'tv' : m.media_type !== 'tv'));
     if (type === 'movie' && locationFilter !== 'any') {
-        pool = pool.filter(m => m.location === locationFilter || m.location === 'any');
+        pool = pool.filter(m => m.location === locationFilter);
     }
     const label = type === 'tv' ? 'shows' : 'movies';
     if (!pool.length) { toast(`No ${label} match the current filter!`, 'error'); return; }
