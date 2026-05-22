@@ -743,8 +743,16 @@ async function init() {
     }
 
     // Auto-refresh locations for movies that haven't been tagged yet
-    const needsUpdate = movies.filter(m => m.media_type !== 'tv' && (!m.location || m.location === 'any'));
-    if (needsUpdate.length) refreshLocations(needsUpdate);
+    // Refresh locations once per day
+    const lastRefresh = parseInt(localStorage.getItem('lastLocationRefresh') || '0');
+    const oneDayMs = 24 * 60 * 60 * 1000;
+    if (Date.now() - lastRefresh > oneDayMs) {
+        const needsUpdate = movies.filter(m => m.media_type !== 'tv');
+        if (needsUpdate.length) {
+            refreshLocations(needsUpdate);
+            localStorage.setItem('lastLocationRefresh', Date.now().toString());
+        }
+    }
 }
 
 function offerBiometricSetup() {
@@ -1034,24 +1042,16 @@ async function detectLocation(tmdbId) {
         const provData = await provRes.json();
         const nowData  = await nowRes.json();
 
-        const ca = (provData.results || {})['CA'];
-        const isStreaming  = !!(ca && ca.flatrate && ca.flatrate.length > 0);
         const isInTheaters = (nowData.results || []).some(m => m.id === tmdbId);
-
-        if (isStreaming && isInTheaters) return 'any';
-        if (isStreaming)  return 'streaming';
-        if (isInTheaters) return 'theater';
-        return 'any';
+        return isInTheaters ? 'theater' : 'streaming';
     } catch { return 'any'; }
 }
 
 async function refreshLocations(list) {
     for (const m of list) {
         const loc = await detectLocation(m.tmdb_id);
-        if (loc !== 'any') { // only update if we got a definitive answer
-            await db.from('movies').update({ location: loc }).eq('id', m.id);
-            m.location = loc;
-        }
+        await db.from('movies').update({ location: loc }).eq('id', m.id);
+        m.location = loc;
         await new Promise(r => setTimeout(r, 250)); // small delay to avoid rate limiting
     }
     renderMovies(); // re-render once all done
