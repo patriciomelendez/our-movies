@@ -1033,18 +1033,33 @@ async function tmdbTrailer(tmdbId, mediaType) {
     } catch { return null; }
 }
 
+let nowPlayingCA = null;
+
+async function getNowPlayingCA() {
+    if (nowPlayingCA) return nowPlayingCA;
+    try {
+        const r = await fetch(`https://api.themoviedb.org/3/movie/now_playing?api_key=${TMDB_KEY}&region=CA`);
+        const d = await r.json();
+        nowPlayingCA = (d.results || []).map(m => m.id);
+    } catch { nowPlayingCA = []; }
+    return nowPlayingCA;
+}
+
 async function detectLocation(tmdbId) {
     try {
-        const [provRes, nowRes] = await Promise.all([
-            fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/watch/providers?api_key=${TMDB_KEY}`),
-            fetch(`https://api.themoviedb.org/3/movie/now_playing?api_key=${TMDB_KEY}&region=CA`)
+        const [detailRes, nowPlaying] = await Promise.all([
+            fetch(`https://api.themoviedb.org/3/movie/${tmdbId}?api_key=${TMDB_KEY}`),
+            getNowPlayingCA()
         ]);
-        const provData = await provRes.json();
-        const nowData  = await nowRes.json();
+        const detail = await detailRes.json();
 
-        const isInTheaters = (nowData.results || []).some(m => m.id === tmdbId);
-        return isInTheaters ? 'theater' : 'streaming';
-    } catch { return 'any'; }
+        const releaseDate = detail.release_date ? new Date(detail.release_date) : null;
+        const isReleased  = detail.status === 'Released' && releaseDate && releaseDate <= new Date();
+
+        if (!isReleased) return 'upcoming';
+        if (nowPlaying.includes(tmdbId)) return 'theater';
+        return 'streaming';
+    } catch { return 'streaming'; }
 }
 
 async function refreshLocations(list) {
@@ -1197,6 +1212,8 @@ function renderMovies() {
     const allTowatch = films.filter(m => !m.watched);
     const towatch    = locationFilter === 'any'
         ? allTowatch
+        : locationFilter === 'theater'
+        ? allTowatch.filter(m => m.location === 'theater' || m.location === 'upcoming')
         : allTowatch.filter(m => m.location === locationFilter);
     const tvTowatch  = tvs.filter(m => !m.watched);
 
@@ -1259,6 +1276,7 @@ function movieCardHTML(m) {
             ${m.watched ? '<div class="watched-badge">✓</div>' : ''}
             ${!m.watched && m.location === 'streaming' ? '<div class="loc-badge">📺</div>' : ''}
             ${!m.watched && m.location === 'theater'   ? '<div class="loc-badge">🎬</div>' : ''}
+            ${!m.watched && m.location === 'upcoming'  ? '<div class="loc-badge" style="background:rgba(234,179,8,0.85);color:#000">Soon</div>' : ''}
             <div class="card-overlay">
                 <button class="ov-btn" onclick="event.stopPropagation();openDetail('${m.id}')">Info</button>
                 ${unlocked ? `<button class="ov-btn green" onclick="event.stopPropagation();toggleWatched('${m.id}')">${m.watched ? 'Unwatch' : 'Watched'}</button>` : ''}
@@ -1299,7 +1317,7 @@ function openDetail(id) {
             </div>
             <div class="detail-info">
                 <div class="detail-title">${escHtml(m.title)}</div>
-                <div class="detail-year">${m.year || 'Unknown year'}${m.watched && m.watched_at ? ` &nbsp;·&nbsp; <span style="color:#4CAF50;font-size:0.82rem">Watched ${new Date(m.watched_at).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</span>` : ''}</div>
+                <div class="detail-year">${m.year || 'Unknown year'}${m.location === 'upcoming' ? ' &nbsp;·&nbsp; <span style="color:#eab308;font-size:0.82rem">⏳ Coming Soon</span>' : ''}${m.watched && m.watched_at ? ` &nbsp;·&nbsp; <span style="color:#4CAF50;font-size:0.82rem">Watched ${new Date(m.watched_at).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</span>` : ''}</div>
                 <div class="detail-overview">${escHtml(m.overview || 'No description available.')}</div>
                 <div class="detail-actions">
                     ${m.trailer_key
@@ -1363,7 +1381,9 @@ function setLocationFilter(loc) {
 function pickRandom(type) {
     let pool = movies.filter(m => !m.watched && (type === 'tv' ? m.media_type === 'tv' : m.media_type !== 'tv'));
     if (type === 'movie' && locationFilter !== 'any') {
-        pool = pool.filter(m => m.location === locationFilter);
+        pool = locationFilter === 'theater'
+            ? pool.filter(m => m.location === 'theater' || m.location === 'upcoming')
+            : pool.filter(m => m.location === locationFilter);
     }
     const label = type === 'tv' ? 'shows' : 'movies';
     if (!pool.length) { toast(`No ${label} match the current filter!`, 'error'); return; }
