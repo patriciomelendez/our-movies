@@ -741,6 +741,10 @@ async function init() {
         const btn = document.getElementById('biometricSetupBtn');
         if (btn) btn.textContent = '❌ Remove Touch ID / Face ID';
     }
+
+    // Auto-refresh locations for movies that haven't been tagged yet
+    const needsUpdate = movies.filter(m => m.media_type !== 'tv' && (!m.location || m.location === 'any'));
+    if (needsUpdate.length) refreshLocations(needsUpdate);
 }
 
 function offerBiometricSetup() {
@@ -1041,6 +1045,18 @@ async function detectLocation(tmdbId) {
     } catch { return 'any'; }
 }
 
+async function refreshLocations(list) {
+    for (const m of list) {
+        const loc = await detectLocation(m.tmdb_id);
+        if (loc !== 'any') { // only update if we got a definitive answer
+            await db.from('movies').update({ location: loc }).eq('id', m.id);
+            m.location = loc;
+        }
+        await new Promise(r => setTimeout(r, 250)); // small delay to avoid rate limiting
+    }
+    renderMovies(); // re-render once all done
+}
+
 // ─────────────────────────────────────────────
 // SEARCH UI
 // ─────────────────────────────────────────────
@@ -1128,7 +1144,7 @@ function showAddModal(movie) {
         ? movie.overview.slice(0,160) + '…'
         : (movie.overview || 'No description available.');
     const loc = movie.location || 'any';
-    const locLabel = loc === 'streaming' ? '📺 Streaming' : loc === 'theater' ? '🎬 In Theaters' : '🎲 Both';
+    const locLabel = loc === 'streaming' ? '📺 Streaming in Canada' : loc === 'theater' ? '🎬 In Theaters' : null;
 
     document.getElementById('addPreview').innerHTML = `
         <div class="add-preview">
@@ -1138,27 +1154,13 @@ function showAddModal(movie) {
             <div class="add-preview-info">
                 <h3>${escHtml(movie.title)}</h3>
                 <p>${movie.year || 'Unknown year'}</p>
-                <div class="overview">${escHtml(snippet)}</div>
+                ${locLabel ? `<p style="margin-top:6px;font-size:0.8rem;color:#4CAF50;font-weight:600">${locLabel}</p>` : ''}
+                <div class="overview" style="margin-top:6px">${escHtml(snippet)}</div>
             </div>
-        </div>
-        ${movie.media_type !== 'tv' ? `
-        <div style="margin-top:16px">
-            <div style="font-size:0.8rem;color:#666;margin-bottom:8px;font-weight:600">WHERE TO WATCH</div>
-            <div style="display:flex;gap:8px">
-                <button class="loc-toggle ${loc==='streaming'?'loc-active':''}" onclick="setAddLoc('streaming')">📺 Streaming</button>
-                <button class="loc-toggle ${loc==='theater'?'loc-active':''}" onclick="setAddLoc('theater')">🎬 In Theaters</button>
-                <button class="loc-toggle ${loc==='any'?'loc-active':''}" onclick="setAddLoc('any')">🎲 Both</button>
-            </div>
-            <div style="font-size:0.75rem;color:#444;margin-top:8px">Auto-detected: ${locLabel} — tap to change</div>
-        </div>` : ''}`;
+        </div>`;
     document.getElementById('addModal').style.display = 'flex';
 }
 
-function setAddLoc(loc) {
-    if (pendingMovie) pendingMovie.location = loc;
-    document.querySelectorAll('.loc-toggle').forEach(b => b.classList.remove('loc-active'));
-    event.target.classList.add('loc-active');
-}
 
 async function confirmAdd() {
     if (!pendingMovie) return;
