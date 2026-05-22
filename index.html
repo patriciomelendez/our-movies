@@ -468,6 +468,51 @@
         ::-webkit-scrollbar-track { background: transparent; }
         ::-webkit-scrollbar-thumb { background: #333; border-radius: 3px; }
 
+        /* Location filter pills */
+        .filter-pills { display: flex; gap: 8px; margin-bottom: 20px; flex-wrap: wrap; }
+        .filter-pill {
+            padding: 6px 14px;
+            border-radius: 20px;
+            border: 1px solid #2e2e2e;
+            background: transparent;
+            color: #666;
+            font-size: 0.8rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.18s;
+        }
+        .filter-pill:hover { border-color: #555; color: #aaa; }
+        .filter-pill.active { background: #e50914; border-color: #e50914; color: white; }
+
+        /* Location badge on card */
+        .loc-badge {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            font-size: 0.7rem;
+            background: rgba(0,0,0,0.75);
+            border-radius: 4px;
+            padding: 2px 5px;
+            backdrop-filter: blur(4px);
+        }
+
+        /* Location toggle in add modal */
+        .loc-toggle {
+            flex: 1;
+            padding: 8px 6px;
+            border-radius: 8px;
+            border: 1px solid #333;
+            background: transparent;
+            color: #666;
+            font-size: 0.78rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.15s;
+            text-align: center;
+        }
+        .loc-toggle:hover { border-color: #555; color: #aaa; }
+        .loc-toggle.loc-active { background: #e50914; border-color: #e50914; color: white; }
+
         /* Month groups in Watched tab */
         .month-group { margin-bottom: 36px; }
         .month-label {
@@ -556,6 +601,11 @@
         <div class="section-header">
             <span class="section-count" id="count-towatch"></span>
             <button class="btn-random" onclick="pickRandom('movie')">🎲 Pick Random</button>
+        </div>
+        <div class="filter-pills">
+            <button class="filter-pill active" id="pill-any" onclick="setLocationFilter('any')">All</button>
+            <button class="filter-pill" id="pill-streaming" onclick="setLocationFilter('streaming')">📺 Streaming</button>
+            <button class="filter-pill" id="pill-theater" onclick="setLocationFilter('theater')">🎬 In Theaters</button>
         </div>
         <div class="movie-grid" id="grid-towatch">
             <div class="loading-state"><div class="spinner"></div></div>
@@ -660,9 +710,10 @@ let currentTab     = 'towatch';
 let pendingMovie   = null;
 let pwAction       = 'unlock';   // 'unlock' | 'change'
 let changePwMode   = false;
-let searchTimer    = null;
-let highlightId    = null;
-let searchResults  = [];
+let searchTimer     = null;
+let highlightId     = null;
+let searchResults   = [];
+let locationFilter  = 'any'; // 'any' | 'streaming' | 'theater'
 
 // ─────────────────────────────────────────────
 // INIT
@@ -908,6 +959,7 @@ async function addMovie(m) {
         overview:    m.overview,
         trailer_key: m.trailer_key,
         media_type:  m.media_type || 'movie',
+        location:    m.location || 'any',
         watched:     false
     }]).select().single();
 
@@ -969,6 +1021,26 @@ async function tmdbTrailer(tmdbId, mediaType) {
     } catch { return null; }
 }
 
+async function detectLocation(tmdbId) {
+    try {
+        const [provRes, nowRes] = await Promise.all([
+            fetch(`https://api.themoviedb.org/3/movie/${tmdbId}/watch/providers?api_key=${TMDB_KEY}`),
+            fetch(`https://api.themoviedb.org/3/movie/now_playing?api_key=${TMDB_KEY}&region=CA`)
+        ]);
+        const provData = await provRes.json();
+        const nowData  = await nowRes.json();
+
+        const ca = (provData.results || {})['CA'];
+        const isStreaming  = !!(ca && ca.flatrate && ca.flatrate.length > 0);
+        const isInTheaters = (nowData.results || []).some(m => m.id === tmdbId);
+
+        if (isStreaming && isInTheaters) return 'any';
+        if (isStreaming)  return 'streaming';
+        if (isInTheaters) return 'theater';
+        return 'any';
+    } catch { return 'any'; }
+}
+
 // ─────────────────────────────────────────────
 // SEARCH UI
 // ─────────────────────────────────────────────
@@ -1019,7 +1091,10 @@ async function selectResult(index) {
     document.getElementById('searchDropdown').style.display = 'none';
     document.getElementById('searchInput').value = '';
 
-    const trailerKey = await tmdbTrailer(r.id, isTv ? 'tv' : 'movie');
+    const [trailerKey, location] = await Promise.all([
+        tmdbTrailer(r.id, isTv ? 'tv' : 'movie'),
+        isTv ? Promise.resolve('any') : detectLocation(r.id)
+    ]);
     const title = isTv ? r.name : r.title;
     const date  = isTv ? r.first_air_date : r.release_date;
 
@@ -1030,7 +1105,8 @@ async function selectResult(index) {
         poster_path: r.poster_path || '',
         overview:   r.overview || '',
         trailer_key: trailerKey,
-        media_type: isTv ? 'tv' : 'movie'
+        media_type: isTv ? 'tv' : 'movie',
+        location:   location
     };
 
     if (!unlocked) { pendingMovie = item; openPwModal('unlock'); return; }
@@ -1051,6 +1127,8 @@ function showAddModal(movie) {
     const snippet = (movie.overview || '').length > 160
         ? movie.overview.slice(0,160) + '…'
         : (movie.overview || 'No description available.');
+    const loc = movie.location || 'any';
+    const locLabel = loc === 'streaming' ? '📺 Streaming' : loc === 'theater' ? '🎬 In Theaters' : '🎲 Both';
 
     document.getElementById('addPreview').innerHTML = `
         <div class="add-preview">
@@ -1062,8 +1140,24 @@ function showAddModal(movie) {
                 <p>${movie.year || 'Unknown year'}</p>
                 <div class="overview">${escHtml(snippet)}</div>
             </div>
-        </div>`;
+        </div>
+        ${movie.media_type !== 'tv' ? `
+        <div style="margin-top:16px">
+            <div style="font-size:0.8rem;color:#666;margin-bottom:8px;font-weight:600">WHERE TO WATCH</div>
+            <div style="display:flex;gap:8px">
+                <button class="loc-toggle ${loc==='streaming'?'loc-active':''}" onclick="setAddLoc('streaming')">📺 Streaming</button>
+                <button class="loc-toggle ${loc==='theater'?'loc-active':''}" onclick="setAddLoc('theater')">🎬 In Theaters</button>
+                <button class="loc-toggle ${loc==='any'?'loc-active':''}" onclick="setAddLoc('any')">🎲 Both</button>
+            </div>
+            <div style="font-size:0.75rem;color:#444;margin-top:8px">Auto-detected: ${locLabel} — tap to change</div>
+        </div>` : ''}`;
     document.getElementById('addModal').style.display = 'flex';
+}
+
+function setAddLoc(loc) {
+    if (pendingMovie) pendingMovie.location = loc;
+    document.querySelectorAll('.loc-toggle').forEach(b => b.classList.remove('loc-active'));
+    event.target.classList.add('loc-active');
 }
 
 async function confirmAdd() {
@@ -1098,8 +1192,11 @@ function renderMovies() {
     const tvs       = movies.filter(m => m.media_type === 'tv');
     const allWatched = movies.filter(m => m.watched);
 
-    const towatch   = films.filter(m => !m.watched);
-    const tvTowatch = tvs.filter(m => !m.watched);
+    const allTowatch = films.filter(m => !m.watched);
+    const towatch    = locationFilter === 'any'
+        ? allTowatch
+        : allTowatch.filter(m => m.location === locationFilter || m.location === 'any');
+    const tvTowatch  = tvs.filter(m => !m.watched);
 
     document.getElementById('count-towatch').textContent       = `${towatch.length} movie${towatch.length !== 1 ? 's' : ''} to watch`;
     document.getElementById('count-tvshows-watch').textContent = `${tvTowatch.length} show${tvTowatch.length !== 1 ? 's' : ''} to watch`;
@@ -1158,6 +1255,8 @@ function movieCardHTML(m) {
                 ? `<img class="movie-poster" src="${src}" alt="${escHtml(m.title)}" loading="lazy">`
                 : `<div class="poster-placeholder">🎬</div>`}
             ${m.watched ? '<div class="watched-badge">✓</div>' : ''}
+            ${!m.watched && m.location === 'streaming' ? '<div class="loc-badge">📺</div>' : ''}
+            ${!m.watched && m.location === 'theater'   ? '<div class="loc-badge">🎬</div>' : ''}
             <div class="card-overlay">
                 <button class="ov-btn" onclick="event.stopPropagation();openDetail('${m.id}')">Info</button>
                 ${unlocked ? `<button class="ov-btn green" onclick="event.stopPropagation();toggleWatched('${m.id}')">${m.watched ? 'Unwatch' : 'Watched'}</button>` : ''}
@@ -1251,10 +1350,21 @@ function handleDetailBg(e) {
 // ─────────────────────────────────────────────
 // RANDOM PICK
 // ─────────────────────────────────────────────
+function setLocationFilter(loc) {
+    locationFilter = loc;
+    ['any','streaming','theater'].forEach(l => {
+        document.getElementById(`pill-${l}`)?.classList.toggle('active', l === loc);
+    });
+    renderMovies();
+}
+
 function pickRandom(type) {
-    const pool = movies.filter(m => !m.watched && (type === 'tv' ? m.media_type === 'tv' : m.media_type !== 'tv'));
+    let pool = movies.filter(m => !m.watched && (type === 'tv' ? m.media_type === 'tv' : m.media_type !== 'tv'));
+    if (type === 'movie' && locationFilter !== 'any') {
+        pool = pool.filter(m => m.location === locationFilter || m.location === 'any');
+    }
     const label = type === 'tv' ? 'shows' : 'movies';
-    if (!pool.length) { toast(`No ${label} left to watch!`, 'error'); return; }
+    if (!pool.length) { toast(`No ${label} match the current filter!`, 'error'); return; }
 
     const pick = pool[Math.floor(Math.random() * pool.length)];
     highlightId = pick.id;
