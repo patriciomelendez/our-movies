@@ -651,37 +651,28 @@
 </main>
 
 <!-- PASSWORD MODAL -->
-<div class="modal-overlay" id="passwordModal" style="display:none">
+<div class="modal-overlay" id="authModal" style="display:none">
     <div class="modal">
-        <button class="modal-close" onclick="closePasswordModal()">×</button>
-        <div class="modal-title" id="pwModalTitle">Enter Password</div>
+        <div class="modal-title" id="authModalTitle">Sign In</div>
 
         <div class="form-group">
-            <label class="form-label" id="pwLabel">Password</label>
-            <input type="password" class="form-input" id="pwInput" placeholder="••••••••" onkeydown="if(event.key==='Enter')submitPassword()">
+            <label class="form-label">Email</label>
+            <input type="email" class="form-input" id="authEmail" placeholder="your@email.com" autocomplete="email" onkeydown="if(event.key==='Enter')document.getElementById('authPassword').focus()">
         </div>
 
-        <div id="changePwFields" style="display:none">
-            <div class="form-group">
-                <label class="form-label">New Password</label>
-                <input type="password" class="form-input" id="newPwInput" placeholder="New password">
-            </div>
-            <div class="form-group">
-                <label class="form-label">Confirm New Password</label>
-                <input type="password" class="form-input" id="confirmPwInput" placeholder="Confirm password">
-            </div>
+        <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" class="form-input" id="authPassword" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitAuth()">
         </div>
 
-        <div class="form-error" id="pwError"></div>
+        <div class="form-error" id="authError"></div>
 
-        <div class="form-actions">
-            <button class="btn btn-gray" onclick="closePasswordModal()">Cancel</button>
-            <button class="btn btn-red" id="pwSubmitBtn" onclick="submitPassword()">Unlock</button>
+        <div class="form-actions" style="margin-top:8px">
+            <button class="btn btn-red" id="authSubmitBtn" onclick="submitAuth()" style="width:100%">Sign In</button>
         </div>
 
-        <div style="text-align:center;margin-top:16px;display:flex;flex-direction:column;gap:8px">
-            <button id="changePwToggle" style="background:none;border:none;color:#444;font-size:0.8rem;cursor:pointer;text-decoration:underline" onclick="toggleChangePw()">Change password</button>
-            <button id="biometricSetupBtn" style="background:none;border:none;color:#444;font-size:0.8rem;cursor:pointer;text-decoration:underline" onclick="setupBiometric()">🔑 Set up Touch ID / Face ID</button>
+        <div style="text-align:center;margin-top:14px">
+            <button id="authToggleBtn" style="background:none;border:none;color:#555;font-size:0.82rem;cursor:pointer;text-decoration:underline" onclick="toggleAuthMode()">First time? Create your account</button>
         </div>
     </div>
 </div>
@@ -694,7 +685,7 @@
         <div id="addPreview"></div>
         <div class="form-actions">
             <button class="btn btn-gray" onclick="closeAddModal()">Cancel</button>
-            <button class="btn btn-red" id="addConfirmBtn" onclick="confirmAdd()">Add Movie</button>
+            <button class="btn btn-red" id="addConfirmBtn" onclick="confirmAdd()">Add</button>
         </div>
     </div>
 </div>
@@ -727,8 +718,7 @@ let unlocked       = false;
 let movies         = [];
 let currentTab     = 'towatch';
 let pendingMovie   = null;
-let pwAction       = 'unlock';   // 'unlock' | 'change'
-let changePwMode   = false;
+let authMode       = 'signin';   // 'signin' | 'signup'
 let searchTimer     = null;
 let highlightId     = null;
 let searchResults   = [];
@@ -737,33 +727,28 @@ let locationFilter  = 'any'; // 'any' | 'streaming' | 'theater'
 // ─────────────────────────────────────────────
 // INIT
 // ─────────────────────────────────────────────
-const UNLOCK_DURATION = 10 * 60 * 1000; // 10 minutes
+const ALLOWED_EMAILS = ['patricio.mcon@gmail.com', 'alejandrayabar96@gmail.com'];
 const RT_VER = 8; // bump this to force re-fetch of all RT scores
 
 async function init() {
     const { data, error } = await db.from('movies').select('*').order('added_at', { ascending: false });
     if (!error) movies = data || [];
 
-    // Auto-unlock if unlocked within the last 10 minutes
-    const unlockedAt = parseInt(localStorage.getItem('unlockedAt') || '0');
-    if (Date.now() - unlockedAt < UNLOCK_DURATION) {
-        unlocked = true;
-        document.getElementById('lockBtn').innerHTML = '🔓 Lock';
-        document.getElementById('lockBtn').classList.add('unlocked');
-        document.getElementById('authStatus').textContent = 'Unlocked';
-        document.getElementById('searchSection').style.display = 'block';
+    // Check Supabase auth session (persists automatically across reloads)
+    const { data: { session } } = await db.auth.getSession();
+    if (session) {
+        applyUnlocked(session.user.email);
     }
+
+    // React to sign-in / sign-out events in real time
+    db.auth.onAuthStateChange((_event, session) => {
+        if (session) applyUnlocked(session.user.email);
+        else applyLocked();
+    });
 
     renderMovies();
 
-    // Update biometric button label if modal is opened later
-    if (localStorage.getItem('biometricEnabled')) {
-        const btn = document.getElementById('biometricSetupBtn');
-        if (btn) btn.textContent = '❌ Remove Touch ID / Face ID';
-    }
-
-    // Auto-refresh locations for movies that haven't been tagged yet
-    // Refresh locations once per day
+    // Auto-refresh locations once per day
     const lastRefresh = parseInt(localStorage.getItem('lastLocationRefresh') || '0');
     const oneDayMs = 24 * 60 * 60 * 1000;
     if (Date.now() - lastRefresh > oneDayMs) {
@@ -775,7 +760,6 @@ async function init() {
     }
 
     // Re-fetch RT scores if missing or saved by an older version of the logic
-    // TV shows excluded: OMDb never has RT scores for series; their scores are set manually
     const needsRT = movies.filter(m => m.media_type !== 'tv' && (
         !m.rt_score ||
         parseInt((m.rt_score.split('|')[2] || '0')) < RT_VER
@@ -784,9 +768,8 @@ async function init() {
 }
 
 function offerBiometricSetup() {
-    // Show a small banner offering biometric setup
-    const existing = document.getElementById('biometricBanner');
-    if (existing) return;
+    // (biometric retired — kept as no-op for safety)
+    return;
     const banner = document.createElement('div');
     banner.id = 'biometricBanner';
     banner.style.cssText = 'position:fixed;bottom:80px;right:24px;background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:16px 20px;z-index:9000;max-width:280px;box-shadow:0 8px 32px rgba(0,0,0,0.6)';
@@ -805,65 +788,92 @@ function offerBiometricSetup() {
 // AUTH
 // ─────────────────────────────────────────────
 function handleLockClick() {
-    if (unlocked) { doLock(); return; }
-    // Try biometric first, fall back to password
-    tryBiometric().then(ok => { if (!ok) openPwModal('unlock'); });
+    if (unlocked) {
+        db.auth.signOut();
+        return;
+    }
+    openAuthModal();
 }
 
-function doUnlock() {
+function applyUnlocked(email) {
     unlocked = true;
-    localStorage.setItem('unlockedAt', Date.now().toString());
     document.getElementById('lockBtn').innerHTML = '🔓 Lock';
     document.getElementById('lockBtn').classList.add('unlocked');
-    document.getElementById('authStatus').textContent = 'Unlocked';
+    const name = email === 'patricio.mcon@gmail.com' ? 'Patricio' : 'Alejandra';
+    document.getElementById('authStatus').textContent = name;
     document.getElementById('searchSection').style.display = 'block';
     renderMovies();
 }
 
-function doLock() {
+function applyLocked() {
     unlocked = false;
-    localStorage.removeItem('unlockedAt');
     document.getElementById('lockBtn').innerHTML = '🔒 Unlock';
     document.getElementById('lockBtn').classList.remove('unlocked');
     document.getElementById('authStatus').textContent = '';
     document.getElementById('searchSection').style.display = 'none';
-    toast('Locked', 'success');
+    toast('Signed out', 'success');
     renderMovies();
 }
 
 // ─────────────────────────────────────────────
-// BIOMETRICS (WebAuthn)
+// EMAIL AUTH (Supabase)
 // ─────────────────────────────────────────────
-const WA_RP_ID = window.location.hostname;
 
-async function isBiometricAvailable() {
-    try {
-        return !!(window.PublicKeyCredential &&
-            await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable());
-    } catch { return false; }
+function openAuthModal() {
+    authMode = 'signin';
+    document.getElementById('authModalTitle').textContent = 'Sign In';
+    document.getElementById('authSubmitBtn').textContent = 'Sign In';
+    document.getElementById('authToggleBtn').textContent = 'First time? Create your account';
+    document.getElementById('authEmail').value = '';
+    document.getElementById('authPassword').value = '';
+    document.getElementById('authError').style.display = 'none';
+    document.getElementById('authModal').style.display = 'flex';
+    setTimeout(() => document.getElementById('authEmail').focus(), 80);
 }
 
-async function tryBiometric() {
-    if (!localStorage.getItem('biometricEnabled')) return false;
-    if (!await isBiometricAvailable()) return false;
-    try {
-        const stored = localStorage.getItem('waCredId');
-        if (!stored) return false;
-        const credId = Uint8Array.from(atob(stored), c => c.charCodeAt(0));
-        const assertion = await navigator.credentials.get({
-            publicKey: {
-                challenge: crypto.getRandomValues(new Uint8Array(32)),
-                rpId: WA_RP_ID,
-                allowCredentials: [{ id: credId, type: 'public-key', transports: ['internal'] }],
-                userVerification: 'required',
-                timeout: 60000
-            }
-        });
-        if (assertion) { doUnlock(); toast('Unlocked!', 'success'); return true; }
-    } catch(e) { /* user cancelled or failed — fall through to password */ }
-    return false;
+function closeAuthModal() {
+    document.getElementById('authModal').style.display = 'none';
 }
 
+function toggleAuthMode() {
+    authMode = authMode === 'signin' ? 'signup' : 'signin';
+    const isSignup = authMode === 'signup';
+    document.getElementById('authModalTitle').textContent = isSignup ? 'Create Account' : 'Sign In';
+    document.getElementById('authSubmitBtn').textContent = isSignup ? 'Create Account' : 'Sign In';
+    document.getElementById('authToggleBtn').textContent = isSignup ? 'Already have an account? Sign in' : 'First time? Create your account';
+    document.getElementById('authError').style.display = 'none';
+}
+
+async function submitAuth() {
+    const authErr = document.getElementById('authError');
+    authErr.style.display = 'none';
+    const email = document.getElementById('authEmail').value.trim().toLowerCase();
+    const password = document.getElementById('authPassword').value;
+
+    if (!ALLOWED_EMAILS.includes(email)) {
+        showErr(authErr, 'This email is not authorized to access this list.');
+        return;
+    }
+    if (!password) { showErr(authErr, 'Please enter your password'); return; }
+
+    if (authMode === 'signup') {
+        const { error } = await db.auth.signUp({ email, password });
+        if (error) { showErr(authErr, error.message); return; }
+        toast('Account created! You\'re now signed in 🎉', 'success');
+    } else {
+        const { error } = await db.auth.signInWithPassword({ email, password });
+        if (error) { showErr(authErr, 'Incorrect email or password'); return; }
+    }
+
+    closeAuthModal();
+    if (pendingMovie) { showAddModal(pendingMovie); pendingMovie = null; }
+}
+
+// ─────────────────────────────────────────────
+// BIOMETRICS (legacy, retired)
+// ─────────────────────────────────────────────
+async function isBiometricAvailable() { return false; }
+async function tryBiometric() { return false; }
 async function setupBiometric() {
     const btn = document.getElementById('biometricSetupBtn');
     if (!await isBiometricAvailable()) {
@@ -906,83 +916,6 @@ async function setupBiometric() {
     } catch(e) {
         if (e.name !== 'NotAllowedError') toast('Could not enable biometrics', 'error');
     }
-}
-
-function openPwModal(action) {
-    pwAction = action;
-    changePwMode = action === 'change';
-
-    document.getElementById('pwInput').value = '';
-    document.getElementById('newPwInput').value = '';
-    document.getElementById('confirmPwInput').value = '';
-    document.getElementById('pwError').style.display = 'none';
-
-    if (changePwMode) {
-        document.getElementById('pwModalTitle').textContent = 'Change Password';
-        document.getElementById('pwLabel').textContent = 'Current Password';
-        document.getElementById('changePwFields').style.display = 'block';
-        document.getElementById('pwSubmitBtn').textContent = 'Change Password';
-        document.getElementById('changePwToggle').style.display = 'none';
-    } else {
-        document.getElementById('pwModalTitle').textContent = 'Enter Password';
-        document.getElementById('pwLabel').textContent = 'Password';
-        document.getElementById('changePwFields').style.display = 'none';
-        document.getElementById('pwSubmitBtn').textContent = 'Unlock';
-        document.getElementById('changePwToggle').style.display = 'inline';
-    }
-
-    document.getElementById('passwordModal').style.display = 'flex';
-    setTimeout(() => document.getElementById('pwInput').focus(), 80);
-}
-
-function closePasswordModal() {
-    document.getElementById('passwordModal').style.display = 'none';
-    if (pwAction === 'unlock') pendingMovie = null;
-}
-
-function toggleChangePw() {
-    changePwMode = !changePwMode;
-    document.getElementById('changePwFields').style.display = changePwMode ? 'block' : 'none';
-    document.getElementById('pwSubmitBtn').textContent = changePwMode ? 'Change Password' : 'Unlock';
-}
-
-async function submitPassword() {
-    const pwErr = document.getElementById('pwError');
-    pwErr.style.display = 'none';
-
-    const entered = document.getElementById('pwInput').value;
-    if (!entered) { showErr(pwErr, 'Please enter the password'); return; }
-
-    const { data, error } = await db.from('settings').select('value').eq('key','password').single();
-    if (error) { showErr(pwErr, 'Database error'); return; }
-
-    if (entered !== data.value) { showErr(pwErr, 'Incorrect password'); return; }
-
-    if (changePwMode) {
-        const np = document.getElementById('newPwInput').value;
-        const cp = document.getElementById('confirmPwInput').value;
-        if (!np) { showErr(pwErr, 'New password cannot be empty'); return; }
-        if (np !== cp) { showErr(pwErr, 'Passwords do not match'); return; }
-        const { error: ue } = await db.from('settings').update({ value: np }).eq('key','password');
-        if (ue) { showErr(pwErr, 'Failed to update password'); return; }
-        toast('Password updated!', 'success');
-        closePasswordModal();
-        return;
-    }
-
-    // unlock
-    doUnlock();
-    closePasswordModal();
-    toast('Unlocked!', 'success');
-
-    // Offer biometric setup if available and not yet configured
-    isBiometricAvailable().then(available => {
-        if (available && !localStorage.getItem('biometricEnabled')) {
-            offerBiometricSetup();
-        }
-    });
-
-    if (pendingMovie) { showAddModal(pendingMovie); pendingMovie = null; }
 }
 
 function showErr(el, msg) { el.textContent = msg; el.style.display = 'block'; }
@@ -1295,7 +1228,7 @@ async function selectResult(index) {
         rt_score:   rtScore
     };
 
-    if (!unlocked) { pendingMovie = item; openPwModal('unlock'); return; }
+    if (!unlocked) { pendingMovie = item; openAuthModal(); return; }
     showAddModal(item);
 }
 
