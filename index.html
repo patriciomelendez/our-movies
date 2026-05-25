@@ -775,7 +775,8 @@ async function init() {
     }
 
     // Re-fetch RT scores if missing or saved by an older version of the logic
-    const needsRT = movies.filter(m => (
+    // TV shows excluded: OMDb never has RT scores for series; their scores are set manually
+    const needsRT = movies.filter(m => m.media_type !== 'tv' && (
         !m.rt_score ||
         parseInt((m.rt_score.split('|')[2] || '0')) < RT_VER
     ));
