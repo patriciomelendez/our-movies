@@ -738,7 +738,7 @@ let locationFilter  = 'any'; // 'any' | 'streaming' | 'theater'
 // INIT
 // ─────────────────────────────────────────────
 const UNLOCK_DURATION = 10 * 60 * 1000; // 10 minutes
-const RT_VER = 7; // bump this to force re-fetch of all RT scores
+const RT_VER = 8; // bump this to force re-fetch of all RT scores
 
 async function init() {
     const { data, error } = await db.from('movies').select('*').order('added_at', { ascending: false });
@@ -1123,8 +1123,24 @@ async function fetchRTScore(title, year, tmdbId) {
     } catch { return null; }
 }
 
+// Only re-check the RT slug format (TMDB call only, no OMDb).
+// Used when a score already exists but the URL version is outdated.
+async function refreshRTSlug(score, title, year, tmdbId) {
+    let useSearch = false;
+    if (year) {
+        try {
+            const r = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}`);
+            const d = await r.json();
+            const exactMatches = (d.results || []).filter(m =>
+                (m.title || '').toLowerCase() === title.toLowerCase()
+            );
+            if (exactMatches.length > 1) useSearch = true;
+        } catch {}
+    }
+    return `${score}|${useSearch ? -1 : 0}|${RT_VER}|${title}`;
+}
+
 async function refreshRTScores(list) {
-    // Show a persistent indicator while refresh is in progress
     const ind = Object.assign(document.createElement('div'), {
         id: 'rt-refresh-indicator',
         textContent: `🍅 Updating RT links (0/${list.length})…`
@@ -1140,12 +1156,25 @@ async function refreshRTScores(list) {
     for (let i = 0; i < list.length; i++) {
         const m = list[i];
         ind.textContent = `🍅 Updating RT links (${i+1}/${list.length})…`;
-        const score = await fetchRTScore(m.title, m.year, m.tmdb_id);
-        if (score) {
-            await db.from('movies').update({ rt_score: score }).eq('id', m.id);
-            m.rt_score = score;
+
+        const existing = parseRT(m.rt_score);
+        let newEntry;
+
+        if (existing.score) {
+            // Score already saved — only redo the slug/URL check (TMDB only, no OMDb)
+            // This preserves scores forever and avoids OMDb rate limits
+            const slugTitle = existing.omdbTitle || m.title;
+            newEntry = await refreshRTSlug(existing.score, slugTitle, m.year, m.tmdb_id);
+        } else {
+            // No score yet — full fetch from OMDb + slug determination
+            newEntry = await fetchRTScore(m.title, m.year, m.tmdb_id);
         }
-        await new Promise(r => setTimeout(r, 400));
+
+        if (newEntry) {
+            await db.from('movies').update({ rt_score: newEntry }).eq('id', m.id);
+            m.rt_score = newEntry;
+        }
+        await new Promise(r => setTimeout(r, 300));
     }
     ind.remove();
     renderMovies();
