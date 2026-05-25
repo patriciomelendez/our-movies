@@ -1504,20 +1504,31 @@ function openDetail(id) {
     fetchWatchProviders(m.tmdb_id, m.media_type).then(providers => {
         const el = document.getElementById('watchProviders');
         if (!el) return;
-        const flatrate = providers?.flatrate || [];
-        const free     = providers?.free     || [];
+        const flatrate  = providers?.flatrate || [];
+        const free      = providers?.free     || [];
+        const rent      = providers?.rent     || [];
         const allStream = [...flatrate, ...free];
-        if (!allStream.length) return;
+        if (!allStream.length && !rent.length) return;
         el.innerHTML = `
             <div class="streaming-section">
-                <div class="streaming-label">Where to Watch</div>
-                <div class="streaming-providers">
-                    ${allStream.map(p => `
-                        <div class="provider-chip">
-                            <img src="https://image.tmdb.org/t/p/w45${p.logo_path}" alt="${escHtml(p.provider_name)}">
-                            <span>${escHtml(p.provider_name)}</span>
-                        </div>`).join('')}
-                </div>
+                ${allStream.length ? `
+                    <div class="streaming-label">Streaming</div>
+                    <div class="streaming-providers">
+                        ${allStream.map(p => `
+                            <div class="provider-chip">
+                                <img src="https://image.tmdb.org/t/p/w45${p.logo_path}" alt="${escHtml(p.provider_name)}">
+                                <span>${escHtml(p.provider_name)}</span>
+                            </div>`).join('')}
+                    </div>` : ''}
+                ${rent.length ? `
+                    <div class="streaming-label" style="margin-top:10px">Rent</div>
+                    <div class="streaming-providers">
+                        ${rent.map(p => `
+                            <div class="provider-chip">
+                                <img src="https://image.tmdb.org/t/p/w45${p.logo_path}" alt="${escHtml(p.provider_name)}">
+                                <span>${escHtml(p.provider_name)}</span>
+                            </div>`).join('')}
+                    </div>` : ''}
             </div>`;
         el.style.display = 'block';
     });
