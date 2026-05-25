@@ -738,7 +738,7 @@ let locationFilter  = 'any'; // 'any' | 'streaming' | 'theater'
 // INIT
 // ─────────────────────────────────────────────
 const UNLOCK_DURATION = 10 * 60 * 1000; // 10 minutes
-const RT_VER = 6; // bump this to force re-fetch of all RT scores
+const RT_VER = 7; // bump this to force re-fetch of all RT scores
 
 async function init() {
     const { data, error } = await db.from('movies').select('*').order('added_at', { ascending: false });
@@ -1091,50 +1091,35 @@ async function fetchRTScore(title, year, tmdbId) {
 
         if (!score) return null;
 
-        // 3. Verify the correct RT slug by actually checking RT via corsproxy.io
-        //    Strategy: check no-year URL first (works for most movies).
-        //    If that 404s, try the year URL.
-        //    If proxy is blocked/down, fall back to the "older title" heuristic.
+        // 3. Determine RT link strategy using TMDB exact-title count:
+        //    - UNIQUE title (only 1 TMDB result) → direct slug, always works
+        //    - AMBIGUOUS title (2+ results share the exact name) → RT search URL with
+        //      title+year, so the user lands on search results and picks the right one.
+        //      This covers cases like two "Blue Jay" films in the same year, or
+        //      many "Frankenstein" adaptations where guessing the slug is unreliable.
         const slug = rtSlug(canonical);
         let slugYr = 0;
-
-        const checkRT = async url => {
-            try {
-                const r = await fetch(`https://corsproxy.io/?${encodeURIComponent(url)}`, {
-                    signal: AbortSignal.timeout(8000)
-                });
-                return r.ok; // true=200, false=404/other
-            } catch { return null; } // null = proxy unavailable
-        };
+        let useSearch = false;
 
         if (year) {
-            const noYearOk = await checkRT(`https://www.rottentomatoes.com/m/${slug}`);
-
-            if (noYearOk === true) {
-                slugYr = 0; // no-year URL confirmed ✓
-            } else if (noYearOk === false) {
-                // no-year gives 404 → try with year
-                const yearOk = await checkRT(`https://www.rottentomatoes.com/m/${slug}_${year}`);
-                if (yearOk) slugYr = year;
-            } else {
-                // proxy unavailable → fall back to heuristic (older version check)
-                const r3 = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}`);
-                const d3 = await r3.json();
-                const hasOlderVersion = (d3.results || []).some(m => {
-                    if ((m.title || '').toLowerCase() !== title.toLowerCase()) return false;
-                    if (m.id === tmdbId) return false;
-                    const mYear = m.release_date ? parseInt(m.release_date.slice(0, 4)) : 9999;
-                    return mYear < year;
-                });
-                if (hasOlderVersion) slugYr = year;
+            const r3 = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}`);
+            const d3 = await r3.json();
+            const exactMatches = (d3.results || []).filter(m =>
+                (m.title || '').toLowerCase() === title.toLowerCase()
+            );
+            if (exactMatches.length > 1) {
+                // Ambiguous — use RT search so user always finds the right movie
+                useSearch = true;
             }
         }
 
         // Format: "87%|slugYear|version|OMDb title"
-        // OMDb title is stored so the slug uses RT's canonical title, not TMDB's
-        // (e.g. TMDB: "Night Is Short, Walk on Girl" → OMDb: "The Night Is Short, Walk on Girl")
+        // slugYear = 0   → direct slug, no year suffix
+        // slugYear = -1  → ambiguous title, use RT search URL instead
+        // OMDb title stored for accurate slug (handles "The" prefix differences etc.)
         const canonical = omdbTitle || title;
-        return `${score}|${slugYr}|${RT_VER}|${canonical}`;
+        const finalSlugYr = useSearch ? -1 : slugYr;
+        return `${score}|${finalSlugYr}|${RT_VER}|${canonical}`;
     } catch { return null; }
 }
 
@@ -1392,45 +1377,51 @@ function rtSlug(title) {
 }
 
 // rt_score format: "87%|slugYear|version|OMDb title"
-//   slugYear = 0 → no year in slug; slugYear = 2025 → use /m/title_2025
-//   OMDb title is used for the slug (more accurate than TMDB title)
+//   slugYear =  0  → direct slug, no year  e.g. /m/mind_game
+//   slugYear >  0  → direct slug with year e.g. /m/frankenstein_2025
+//   slugYear = -1  → ambiguous title, use RT search URL (title+year)
+//   OMDb title stored for accurate slug generation
 function parseRT(rtScore) {
-    if (!rtScore) return { score: null, rtYear: null, omdbTitle: null };
+    if (!rtScore) return { score: null, rtYear: null, omdbTitle: null, useSearch: false };
     const parts = rtScore.split('|');
-    if (parts.length === 1) return { score: parts[0], rtYear: null, omdbTitle: null }; // legacy
+    if (parts.length === 1) return { score: parts[0], rtYear: null, omdbTitle: null, useSearch: false };
     const yr = parseInt(parts[1]);
-    // parts[3..] joined in case the title itself contains '|'
     const omdbTitle = parts.length > 3 ? parts.slice(3).join('|') : null;
-    return { score: parts[0], rtYear: yr > 0 ? yr : null, omdbTitle };
+    return { score: parts[0], rtYear: yr > 0 ? yr : null, omdbTitle, useSearch: yr === -1 };
 }
 
-function rtUrl(rtScore, title) {
-    const { rtYear, omdbTitle } = parseRT(rtScore);
-    const slug = rtSlug(omdbTitle || title); // prefer OMDb title for accurate slug
+function rtUrl(rtScore, title, year) {
+    const { rtYear, omdbTitle, useSearch } = parseRT(rtScore);
+    if (useSearch) {
+        // Ambiguous title — search is the only reliable option
+        const q = encodeURIComponent(year ? `${omdbTitle || title} ${year}` : (omdbTitle || title));
+        return `https://www.rottentomatoes.com/search?search=${q}`;
+    }
+    const slug = rtSlug(omdbTitle || title);
     return rtYear
         ? `https://www.rottentomatoes.com/m/${slug}_${rtYear}`
         : `https://www.rottentomatoes.com/m/${slug}`;
 }
 
-function rtBadgeHTML(rtScore, title) {
+function rtBadgeHTML(rtScore, title, year) {
     if (!rtScore) return '';
     const { score } = parseRT(rtScore);
     const pct   = parseInt(score);
     const fresh = pct >= 60;
-    const url   = rtUrl(rtScore, title);
+    const url   = rtUrl(rtScore, title, year);
     return `<a class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" href="${url}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="View on Rotten Tomatoes">${fresh ? '🍅' : '🤢'} ${score}</a>`;
 }
 
-function rtDetailHTML(rtScore, title) {
+function rtDetailHTML(rtScore, title, year) {
     if (!rtScore) return '';
-    const { score } = parseRT(rtScore);
+    const { score, useSearch } = parseRT(rtScore);
     const pct   = parseInt(score);
     const fresh = pct >= 60;
-    const url   = rtUrl(rtScore, title);
+    const url   = rtUrl(rtScore, title, year);
     return `
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-            <a class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" href="${url}" target="_blank" rel="noopener" title="View on Rotten Tomatoes">${fresh ? '🍅' : '🤢'} ${score}</a>
-            <span style="font-size:0.78rem;color:#555">Rotten Tomatoes</span>
+            <a class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" href="${url}" target="_blank" rel="noopener" title="${useSearch ? 'Search on Rotten Tomatoes' : 'View on Rotten Tomatoes'}">${fresh ? '🍅' : '🤢'} ${score}</a>
+            <span style="font-size:0.78rem;color:#555">${useSearch ? 'Rotten Tomatoes (tap to search)' : 'Rotten Tomatoes'}</span>
         </div>`;
 }
 
@@ -1459,7 +1450,7 @@ function movieCardHTML(m) {
         <div class="movie-info">
             <div class="movie-title" title="${escHtml(m.title)}">${escHtml(m.title)}</div>
             <div class="movie-year">${m.year || ''}</div>
-            ${rtBadgeHTML(m.rt_score, m.title)}
+            ${rtBadgeHTML(m.rt_score, m.title, m.year)}
         </div>
     </div>`;
 }
@@ -1492,7 +1483,7 @@ function openDetail(id) {
             <div class="detail-info">
                 <div class="detail-title">${escHtml(m.title)}</div>
                 <div class="detail-year">${m.year || 'Unknown year'}${m.location === 'upcoming' ? ' &nbsp;·&nbsp; <span style="color:#eab308;font-size:0.82rem">⏳ Coming Soon</span>' : ''}${m.watched && m.watched_at ? ` &nbsp;·&nbsp; <span style="color:#4CAF50;font-size:0.82rem">Watched ${new Date(m.watched_at).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</span>` : ''}</div>
-                ${m.rt_score ? rtDetailHTML(m.rt_score, m.title) : ''}
+                ${m.rt_score ? rtDetailHTML(m.rt_score, m.title, m.year) : ''}
                 <div class="detail-overview">${escHtml(m.overview || 'No description available.')}</div>
                 <div class="detail-actions">
                     ${m.trailer_key
