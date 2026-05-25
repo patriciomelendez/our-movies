@@ -513,6 +513,20 @@
         .loc-toggle:hover { border-color: #555; color: #aaa; }
         .loc-toggle.loc-active { background: #e50914; border-color: #e50914; color: white; }
 
+        /* RT Score badge */
+        .rt-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 3px;
+            font-size: 0.72rem;
+            font-weight: 700;
+            padding: 2px 6px;
+            border-radius: 4px;
+            margin-top: 4px;
+        }
+        .rt-fresh  { background: rgba(229,9,20,0.15); color: #ff6b6b; }
+        .rt-rotten { background: rgba(100,100,100,0.15); color: #888; }
+
         /* Month groups in Watched tab */
         .month-group { margin-bottom: 36px; }
         .month-label {
@@ -698,6 +712,7 @@ const SUPABASE_URL  = 'https://kiwcyfscjomenhlheqvx.supabase.co';
 const SUPABASE_KEY  = 'sb_publishable_2HYE8Vc_p8sc7pe0Y1WHzA_LX336F11';
 const TMDB_KEY      = 'b0b8cc130921376671fb86afda7cbe2f';
 const TMDB_IMG_BASE = 'https://image.tmdb.org/t/p/w500';
+const OMDB_KEY      = 'c2b90204';
 
 const db = supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
@@ -753,6 +768,10 @@ async function init() {
             localStorage.setItem('lastLocationRefresh', Date.now().toString());
         }
     }
+
+    // Fetch RT scores for movies that don't have one yet
+    const needsRT = movies.filter(m => m.media_type !== 'tv' && !m.rt_score);
+    if (needsRT.length) refreshRTScores(needsRT);
 }
 
 function offerBiometricSetup() {
@@ -972,6 +991,7 @@ async function addMovie(m) {
         trailer_key: m.trailer_key,
         media_type:  m.media_type || 'movie',
         location:    m.location || 'any',
+        rt_score:    m.rt_score || null,
         watched:     false
     }]).select().single();
 
@@ -1031,6 +1051,32 @@ async function tmdbTrailer(tmdbId, mediaType) {
         const t = (d.results || []).find(v => v.type === 'Trailer' && v.site === 'YouTube');
         return t ? t.key : null;
     } catch { return null; }
+}
+
+// ─────────────────────────────────────────────
+// ROTTEN TOMATOES (OMDb)
+// ─────────────────────────────────────────────
+async function fetchRTScore(title, year) {
+    try {
+        const url = `https://www.omdbapi.com/?t=${encodeURIComponent(title)}${year ? `&y=${year}` : ''}&apikey=${OMDB_KEY}`;
+        const r = await fetch(url);
+        const d = await r.json();
+        if (d.Response !== 'True') return null;
+        const rt = (d.Ratings || []).find(x => x.Source === 'Rotten Tomatoes');
+        return rt ? rt.Value : null; // e.g. "87%"
+    } catch { return null; }
+}
+
+async function refreshRTScores(list) {
+    for (const m of list) {
+        const score = await fetchRTScore(m.title, m.year);
+        if (score) {
+            await db.from('movies').update({ rt_score: score }).eq('id', m.id);
+            m.rt_score = score;
+        }
+        await new Promise(r => setTimeout(r, 300));
+    }
+    renderMovies();
 }
 
 let nowPlayingCA = null;
@@ -1122,22 +1168,26 @@ async function selectResult(index) {
     document.getElementById('searchDropdown').style.display = 'none';
     document.getElementById('searchInput').value = '';
 
-    const [trailerKey, location] = await Promise.all([
-        tmdbTrailer(r.id, isTv ? 'tv' : 'movie'),
-        isTv ? Promise.resolve('any') : detectLocation(r.id)
-    ]);
     const title = isTv ? r.name : r.title;
     const date  = isTv ? r.first_air_date : r.release_date;
+    const year  = date ? date.slice(0,4) : null;
+
+    const [trailerKey, location, rtScore] = await Promise.all([
+        tmdbTrailer(r.id, isTv ? 'tv' : 'movie'),
+        isTv ? Promise.resolve('any') : detectLocation(r.id),
+        isTv ? Promise.resolve(null) : fetchRTScore(title, year)
+    ]);
 
     const item = {
         tmdb_id:    r.id,
         title:      title,
-        year:       date ? parseInt(date.slice(0,4)) : null,
+        year:       year ? parseInt(year) : null,
         poster_path: r.poster_path || '',
         overview:   r.overview || '',
         trailer_key: trailerKey,
         media_type: isTv ? 'tv' : 'movie',
-        location:   location
+        location:   location,
+        rt_score:   rtScore
     };
 
     if (!unlocked) { pendingMovie = item; openPwModal('unlock'); return; }
@@ -1261,6 +1311,13 @@ function renderWatchedByMonth(list) {
     `).join('');
 }
 
+function rtBadgeHTML(score) {
+    if (!score) return '';
+    const pct = parseInt(score);
+    const fresh = pct >= 60;
+    return `<div class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}">${fresh ? '🍅' : '🤢'} ${score}</div>`;
+}
+
 function movieCardHTML(m) {
     const src = m.poster_path ? `${TMDB_IMG_BASE}${m.poster_path}` : '';
     const hi  = m.id === highlightId ? 'highlight-card' : '';
@@ -1286,6 +1343,7 @@ function movieCardHTML(m) {
         <div class="movie-info">
             <div class="movie-title" title="${escHtml(m.title)}">${escHtml(m.title)}</div>
             <div class="movie-year">${m.year || ''}</div>
+            ${rtBadgeHTML(m.rt_score)}
         </div>
     </div>`;
 }
@@ -1318,6 +1376,7 @@ function openDetail(id) {
             <div class="detail-info">
                 <div class="detail-title">${escHtml(m.title)}</div>
                 <div class="detail-year">${m.year || 'Unknown year'}${m.location === 'upcoming' ? ' &nbsp;·&nbsp; <span style="color:#eab308;font-size:0.82rem">⏳ Coming Soon</span>' : ''}${m.watched && m.watched_at ? ` &nbsp;·&nbsp; <span style="color:#4CAF50;font-size:0.82rem">Watched ${new Date(m.watched_at).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</span>` : ''}</div>
+                ${m.rt_score ? `<div style="margin-bottom:12px">${rtBadgeHTML(m.rt_score)} <span style="font-size:0.78rem;color:#555">Rotten Tomatoes</span></div>` : ''}
                 <div class="detail-overview">${escHtml(m.overview || 'No description available.')}</div>
                 <div class="detail-actions">
                     ${m.trailer_key
