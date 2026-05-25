@@ -1060,6 +1060,18 @@ async function tmdbTrailer(tmdbId, mediaType) {
 // ─────────────────────────────────────────────
 // ROTTEN TOMATOES (OMDb)
 // ─────────────────────────────────────────────
+// Check if a Rotten Tomatoes URL actually exists (via CORS proxy)
+async function rtUrlExists(url) {
+    try {
+        const r = await fetch(
+            `https://api.allorigins.win/get?url=${encodeURIComponent(url)}`,
+            { signal: AbortSignal.timeout(8000) }
+        );
+        const d = await r.json();
+        return d.status?.http_code === 200;
+    } catch { return false; }
+}
+
 async function fetchRTScore(title, year) {
     try {
         let score = null;
@@ -1074,27 +1086,31 @@ async function fetchRTScore(title, year) {
             }
         }
 
-        // 2. Also fetch OMDb WITHOUT year — used for disambiguation
-        //    If title-only returns a DIFFERENT year, there's a name collision on RT
-        //    and the RT slug needs the year suffix (e.g. /m/frankenstein_2025)
-        const r2 = await fetch(`https://www.omdbapi.com/?t=${encodeURIComponent(title)}&apikey=${OMDB_KEY}`);
-        const d2 = await r2.json();
-
-        // Fallback: use no-year result if we didn't get a score yet
-        if (!score && d2.Response === 'True') {
-            const rt2 = (d2.Ratings || []).find(x => x.Source === 'Rotten Tomatoes');
-            if (rt2) score = rt2.Value;
+        // 2. Fallback: OMDb without year
+        if (!score) {
+            const r2 = await fetch(`https://www.omdbapi.com/?t=${encodeURIComponent(title)}&apikey=${OMDB_KEY}`);
+            const d2 = await r2.json();
+            if (d2.Response === 'True') {
+                const rt2 = (d2.Ratings || []).find(x => x.Source === 'Rotten Tomatoes');
+                if (rt2) score = rt2.Value;
+            }
         }
 
         if (!score) return null;
 
-        // 3. Determine if RT slug needs year suffix
-        //    If OMDb title-only returns a different year → name collision → needs year in RT slug
-        const omdbYear = d2.Response === 'True' ? parseInt(d2.Year) : null;
-        const needsYear = year && omdbYear && omdbYear !== year;
+        // 3. Determine correct RT slug by actually checking RT via CORS proxy
+        //    Try year URL first — if it exists, RT uses the year suffix (name collision)
+        //    Otherwise fall back to no-year slug
+        const slug = rtSlug(title);
+        let slugYr = 0;
+        if (year) {
+            const yearUrl = `https://www.rottentomatoes.com/m/${slug}_${year}`;
+            const yearWorks = await rtUrlExists(yearUrl);
+            if (yearWorks) slugYr = year;
+        }
 
-        // Encode as "87%|2025" (needs year) or "87%|0" (no year needed)
-        return needsYear ? `${score}|${year}` : `${score}|0`;
+        // Encode as "87%|2025" (year URL confirmed) or "87%|0" (no year needed)
+        return slugYr > 0 ? `${score}|${slugYr}` : `${score}|0`;
     } catch { return null; }
 }
 
