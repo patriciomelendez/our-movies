@@ -1327,41 +1327,64 @@ function renderWatchedByMonth(list) {
 function rtSlug(title) {
     return (title || '')
         .toLowerCase()
-        .replace(/[''`]/g, '')            // remove apostrophes
-        .replace(/[^a-z0-9\s]/g, ' ')    // special chars → space
+        .replace(/[''`]/g, '')
+        .replace(/[^a-z0-9\s]/g, ' ')
         .trim()
-        .replace(/\s+/g, '_');            // spaces → underscores
+        .replace(/\s+/g, '_');
 }
 
-// withYear=false → plain slug (works for most movies)
-// withYear=true  → slug_year (for name-collision movies like Frankenstein 2025)
-function rtBadgeHTML(score, title, year, withYear) {
+function openRTMenu(e, title, year) {
+    e.stopPropagation();
+    e.preventDefault();
+    document.querySelectorAll('.rt-dropdown').forEach(el => el.remove());
+
+    const slug      = rtSlug(title);
+    const urlNoYear = `https://www.rottentomatoes.com/m/${slug}`;
+    const urlYear   = year ? `https://www.rottentomatoes.com/m/${slug}_${year}` : null;
+    const urlSearch = `https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}`;
+
+    const div = document.createElement('div');
+    div.className = 'rt-dropdown';
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const top  = rect.bottom + window.scrollY + 6;
+    const left = Math.min(rect.left + window.scrollX, window.innerWidth - 220);
+    div.style.cssText = `position:absolute;top:${top}px;left:${left}px;background:#1c1c1c;border:1px solid #2e2e2e;border-radius:10px;padding:5px;z-index:9999;box-shadow:0 8px 28px rgba(0,0,0,0.7);min-width:210px`;
+
+    const link = (href, icon, label) =>
+        `<a href="${href}" target="_blank" rel="noopener"
+            style="display:flex;align-items:center;gap:9px;padding:9px 12px;color:#ddd;text-decoration:none;border-radius:7px;font-size:0.82rem;font-weight:600;transition:background 0.15s"
+            onmouseover="this.style.background='#2a2a2a'" onmouseout="this.style.background='transparent'"
+            onclick="document.querySelectorAll('.rt-dropdown').forEach(el=>el.remove())"
+        >${icon} ${label}</a>`;
+
+    div.innerHTML =
+        link(urlNoYear, '🎬', 'Movie page') +
+        (urlYear ? link(urlYear, '📅', `Movie page (${year})`) : '') +
+        `<div style="height:1px;background:#252525;margin:4px 0"></div>` +
+        link(urlSearch, '🔍', 'Search on RT');
+
+    document.body.appendChild(div);
+
+    const close = () => { div.remove(); document.removeEventListener('click', close); };
+    setTimeout(() => document.addEventListener('click', close), 50);
+}
+
+function rtBadgeHTML(score, title, year) {
     if (!score) return '';
     const pct = parseInt(score);
     const fresh = pct >= 60;
-    const slug = rtSlug(title);
-    const rtUrl = withYear && year
-        ? `https://www.rottentomatoes.com/m/${slug}_${year}`
-        : `https://www.rottentomatoes.com/m/${slug}`;
-    return `<a class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" href="${rtUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="View on Rotten Tomatoes">${fresh ? '🍅' : '🤢'} ${score}</a>`;
+    return `<span class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" onclick="openRTMenu(event,'${esc(title)}',${year||'null'})" title="View on Rotten Tomatoes" style="cursor:pointer">${fresh ? '🍅' : '🤢'} ${score}</span>`;
 }
 
 function rtDetailHTML(score, title, year) {
     if (!score) return '';
-    const slug = rtSlug(title);
-    const urlNoYear = `https://www.rottentomatoes.com/m/${slug}`;
-    const urlYear   = `https://www.rottentomatoes.com/m/${slug}_${year}`;
-    const urlSearch = `https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}`;
     const pct = parseInt(score);
     const fresh = pct >= 60;
     return `
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-            <a class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" href="${urlNoYear}" target="_blank" rel="noopener" title="Open on Rotten Tomatoes">${fresh ? '🍅' : '🤢'} ${score}</a>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+            <span class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" onclick="openRTMenu(event,'${esc(title)}',${year||'null'})" style="cursor:pointer" title="View on Rotten Tomatoes">${fresh ? '🍅' : '🤢'} ${score}</span>
             <span style="font-size:0.78rem;color:#555">Rotten Tomatoes</span>
-            <span style="font-size:0.72rem;color:#3a3a3a">·</span>
-            <a href="${urlYear}" target="_blank" rel="noopener" style="font-size:0.72rem;color:#444;text-decoration:none" title="Try with year suffix (for movies with duplicate titles)">with year</a>
-            <span style="font-size:0.72rem;color:#3a3a3a">·</span>
-            <a href="${urlSearch}" target="_blank" rel="noopener" style="font-size:0.72rem;color:#444;text-decoration:none">search</a>
         </div>`;
 }
 
