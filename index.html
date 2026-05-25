@@ -1433,8 +1433,10 @@ function movieCardHTML(m) {
         </div>
         <div class="movie-info">
             <div class="movie-title" title="${escHtml(m.title)}">${escHtml(m.title)}</div>
-            <div class="movie-year">${m.year || ''}</div>
-            ${rtBadgeHTML(m.rt_score, m.title, m.year, m.media_type)}
+            <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+                <div class="movie-year">${m.year || ''}</div>
+                ${rtBadgeHTML(m.rt_score, m.title, m.year, m.media_type)}
+            </div>
         </div>
     </div>`;
 }
