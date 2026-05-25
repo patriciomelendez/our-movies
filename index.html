@@ -1092,41 +1092,38 @@ async function fetchRTScore(title, year, tmdbId) {
         if (!score) return null;
 
         // 3. Determine RT link strategy using TMDB exact-title count:
-        //    - UNIQUE title (only 1 TMDB result) → direct slug, always works
-        //    - AMBIGUOUS title (2+ results share the exact name) → RT search URL with
-        //      title+year, so the user lands on search results and picks the right one.
-        //      This covers cases like two "Blue Jay" films in the same year, or
-        //      many "Frankenstein" adaptations where guessing the slug is unreliable.
-        const slug = rtSlug(canonical);
+        //    - UNIQUE title (only 1 TMDB result) → direct slug, no year suffix
+        //    - AMBIGUOUS title (2+ results share the exact name) → year-suffixed slug
+        //      e.g. /m/frankenstein_2025. RT uses this format for disambiguation.
+        const canonical = omdbTitle || title;
         let slugYr = 0;
-        let useSearch = false;
 
         if (year) {
-            const r3 = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}`);
-            const d3 = await r3.json();
-            const exactMatches = (d3.results || []).filter(m =>
-                (m.title || '').toLowerCase() === title.toLowerCase()
-            );
-            if (exactMatches.length > 1) {
-                // Ambiguous — use RT search so user always finds the right movie
-                useSearch = true;
-            }
+            try {
+                const r3 = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}`);
+                const d3 = await r3.json();
+                const exactMatches = (d3.results || []).filter(m =>
+                    (m.title || '').toLowerCase() === title.toLowerCase()
+                );
+                if (exactMatches.length > 1) {
+                    // RT uses title_year slugs when multiple films share a name
+                    slugYr = year;
+                }
+            } catch {}
         }
 
         // Format: "87%|slugYear|version|OMDb title"
-        // slugYear = 0   → direct slug, no year suffix
-        // slugYear = -1  → ambiguous title, use RT search URL instead
-        // OMDb title stored for accurate slug (handles "The" prefix differences etc.)
-        const canonical = omdbTitle || title;
-        const finalSlugYr = useSearch ? -1 : slugYr;
-        return `${score}|${finalSlugYr}|${RT_VER}|${canonical}`;
+        // slugYear = 0    → direct slug, no year suffix  → /m/title
+        // slugYear = YYYY → year-suffixed slug            → /m/title_YYYY
+        // slugYear = -1   → legacy search fallback (kept for backward compat)
+        return `${score}|${slugYr}|${RT_VER}|${canonical}`;
     } catch { return null; }
 }
 
 // Only re-check the RT slug format (TMDB call only, no OMDb).
 // Used when a score already exists but the URL version is outdated.
 async function refreshRTSlug(score, title, year, tmdbId) {
-    let useSearch = false;
+    let slugYr = 0;
     if (year) {
         try {
             const r = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}`);
@@ -1134,10 +1131,11 @@ async function refreshRTSlug(score, title, year, tmdbId) {
             const exactMatches = (d.results || []).filter(m =>
                 (m.title || '').toLowerCase() === title.toLowerCase()
             );
-            if (exactMatches.length > 1) useSearch = true;
+            // RT uses year-suffixed slugs for ambiguous titles
+            if (exactMatches.length > 1) slugYr = year;
         } catch {}
     }
-    return `${score}|${useSearch ? -1 : 0}|${RT_VER}|${title}`;
+    return `${score}|${slugYr}|${RT_VER}|${title}`;
 }
 
 async function refreshRTScores(list) {
