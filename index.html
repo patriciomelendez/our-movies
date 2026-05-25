@@ -1324,22 +1324,45 @@ function renderWatchedByMonth(list) {
     `).join('');
 }
 
-function rtSlug(title, year) {
-    const base = (title || '')
+function rtSlug(title) {
+    return (title || '')
         .toLowerCase()
         .replace(/[''`]/g, '')            // remove apostrophes
         .replace(/[^a-z0-9\s]/g, ' ')    // special chars → space
         .trim()
         .replace(/\s+/g, '_');            // spaces → underscores
-    return year ? `${base}_${year}` : base;
 }
 
-function rtBadgeHTML(score, title, year) {
+// withYear=false → plain slug (works for most movies)
+// withYear=true  → slug_year (for name-collision movies like Frankenstein 2025)
+function rtBadgeHTML(score, title, year, withYear) {
     if (!score) return '';
     const pct = parseInt(score);
     const fresh = pct >= 60;
-    const rtUrl = `https://www.rottentomatoes.com/m/${rtSlug(title, year)}`;
+    const slug = rtSlug(title);
+    const rtUrl = withYear && year
+        ? `https://www.rottentomatoes.com/m/${slug}_${year}`
+        : `https://www.rottentomatoes.com/m/${slug}`;
     return `<a class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" href="${rtUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="View on Rotten Tomatoes">${fresh ? '🍅' : '🤢'} ${score}</a>`;
+}
+
+function rtDetailHTML(score, title, year) {
+    if (!score) return '';
+    const slug = rtSlug(title);
+    const urlNoYear = `https://www.rottentomatoes.com/m/${slug}`;
+    const urlYear   = `https://www.rottentomatoes.com/m/${slug}_${year}`;
+    const urlSearch = `https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}`;
+    const pct = parseInt(score);
+    const fresh = pct >= 60;
+    return `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+            <a class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" href="${urlNoYear}" target="_blank" rel="noopener" title="Open on Rotten Tomatoes">${fresh ? '🍅' : '🤢'} ${score}</a>
+            <span style="font-size:0.78rem;color:#555">Rotten Tomatoes</span>
+            <span style="font-size:0.72rem;color:#3a3a3a">·</span>
+            <a href="${urlYear}" target="_blank" rel="noopener" style="font-size:0.72rem;color:#444;text-decoration:none" title="Try with year suffix (for movies with duplicate titles)">with year</a>
+            <span style="font-size:0.72rem;color:#3a3a3a">·</span>
+            <a href="${urlSearch}" target="_blank" rel="noopener" style="font-size:0.72rem;color:#444;text-decoration:none">search</a>
+        </div>`;
 }
 
 function movieCardHTML(m) {
@@ -1400,7 +1423,7 @@ function openDetail(id) {
             <div class="detail-info">
                 <div class="detail-title">${escHtml(m.title)}</div>
                 <div class="detail-year">${m.year || 'Unknown year'}${m.location === 'upcoming' ? ' &nbsp;·&nbsp; <span style="color:#eab308;font-size:0.82rem">⏳ Coming Soon</span>' : ''}${m.watched && m.watched_at ? ` &nbsp;·&nbsp; <span style="color:#4CAF50;font-size:0.82rem">Watched ${new Date(m.watched_at).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</span>` : ''}</div>
-                ${m.rt_score ? `<div style="margin-bottom:12px">${rtBadgeHTML(m.rt_score, m.title, m.year)} <span style="font-size:0.78rem;color:#555">Rotten Tomatoes</span></div>` : ''}
+                ${m.rt_score ? rtDetailHTML(m.rt_score, m.title, m.year) : ''}
                 <div class="detail-overview">${escHtml(m.overview || 'No description available.')}</div>
                 <div class="detail-actions">
                     ${m.trailer_key
