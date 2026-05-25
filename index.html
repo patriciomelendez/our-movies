@@ -773,8 +773,8 @@ async function init() {
         }
     }
 
-    // Fetch RT scores for movies that don't have one yet
-    const needsRT = movies.filter(m => m.media_type !== 'tv' && !m.rt_score);
+    // Fetch RT scores for movies missing a score, or using the old format (no '|' = no disambiguation data)
+    const needsRT = movies.filter(m => m.media_type !== 'tv' && (!m.rt_score || !m.rt_score.includes('|')));
     if (needsRT.length) refreshRTScores(needsRT);
 }
 
@@ -1062,21 +1062,39 @@ async function tmdbTrailer(tmdbId, mediaType) {
 // ─────────────────────────────────────────────
 async function fetchRTScore(title, year) {
     try {
-        // Try with year first (more precise)
+        let score = null;
+
+        // 1. Try OMDb with year for precise match
         if (year) {
             const r = await fetch(`https://www.omdbapi.com/?t=${encodeURIComponent(title)}&y=${year}&apikey=${OMDB_KEY}`);
             const d = await r.json();
             if (d.Response === 'True') {
                 const rt = (d.Ratings || []).find(x => x.Source === 'Rotten Tomatoes');
-                if (rt) return rt.Value;
+                if (rt) score = rt.Value;
             }
         }
-        // Fallback: try without year (catches year mismatches between TMDB and OMDb)
+
+        // 2. Also fetch OMDb WITHOUT year — used for disambiguation
+        //    If title-only returns a DIFFERENT year, there's a name collision on RT
+        //    and the RT slug needs the year suffix (e.g. /m/frankenstein_2025)
         const r2 = await fetch(`https://www.omdbapi.com/?t=${encodeURIComponent(title)}&apikey=${OMDB_KEY}`);
         const d2 = await r2.json();
-        if (d2.Response !== 'True') return null;
-        const rt2 = (d2.Ratings || []).find(x => x.Source === 'Rotten Tomatoes');
-        return rt2 ? rt2.Value : null;
+
+        // Fallback: use no-year result if we didn't get a score yet
+        if (!score && d2.Response === 'True') {
+            const rt2 = (d2.Ratings || []).find(x => x.Source === 'Rotten Tomatoes');
+            if (rt2) score = rt2.Value;
+        }
+
+        if (!score) return null;
+
+        // 3. Determine if RT slug needs year suffix
+        //    If OMDb title-only returns a different year → name collision → needs year in RT slug
+        const omdbYear = d2.Response === 'True' ? parseInt(d2.Year) : null;
+        const needsYear = year && omdbYear && omdbYear !== year;
+
+        // Encode as "87%|2025" (needs year) or "87%|0" (no year needed)
+        return needsYear ? `${score}|${year}` : `${score}|0`;
     } catch { return null; }
 }
 
@@ -1333,57 +1351,42 @@ function rtSlug(title) {
         .replace(/\s+/g, '_');
 }
 
-function openRTMenu(e, title, year) {
-    e.stopPropagation();
-    e.preventDefault();
-    document.querySelectorAll('.rt-dropdown').forEach(el => el.remove());
-
-    const slug      = rtSlug(title);
-    const urlNoYear = `https://www.rottentomatoes.com/m/${slug}`;
-    const urlYear   = year ? `https://www.rottentomatoes.com/m/${slug}_${year}` : null;
-    const urlSearch = `https://www.rottentomatoes.com/search?search=${encodeURIComponent(title)}`;
-
-    const div = document.createElement('div');
-    div.className = 'rt-dropdown';
-
-    const rect = e.currentTarget.getBoundingClientRect();
-    const top  = rect.bottom + window.scrollY + 6;
-    const left = Math.min(rect.left + window.scrollX, window.innerWidth - 220);
-    div.style.cssText = `position:absolute;top:${top}px;left:${left}px;background:#1c1c1c;border:1px solid #2e2e2e;border-radius:10px;padding:5px;z-index:9999;box-shadow:0 8px 28px rgba(0,0,0,0.7);min-width:210px`;
-
-    const link = (href, icon, label) =>
-        `<a href="${href}" target="_blank" rel="noopener"
-            style="display:flex;align-items:center;gap:9px;padding:9px 12px;color:#ddd;text-decoration:none;border-radius:7px;font-size:0.82rem;font-weight:600;transition:background 0.15s"
-            onmouseover="this.style.background='#2a2a2a'" onmouseout="this.style.background='transparent'"
-            onclick="document.querySelectorAll('.rt-dropdown').forEach(el=>el.remove())"
-        >${icon} ${label}</a>`;
-
-    div.innerHTML =
-        link(urlNoYear, '🎬', 'Movie page') +
-        (urlYear ? link(urlYear, '📅', `Movie page (${year})`) : '') +
-        `<div style="height:1px;background:#252525;margin:4px 0"></div>` +
-        link(urlSearch, '🔍', 'Search on RT');
-
-    document.body.appendChild(div);
-
-    const close = () => { div.remove(); document.removeEventListener('click', close); };
-    setTimeout(() => document.addEventListener('click', close), 50);
+// rt_score is stored as "87%|2025" (needs year in slug) or "87%|0" (no year needed) or legacy "87%"
+function parseRT(rtScore) {
+    if (!rtScore) return { score: null, rtYear: null };
+    const pipe = rtScore.indexOf('|');
+    if (pipe === -1) return { score: rtScore, rtYear: null }; // legacy format
+    const score  = rtScore.slice(0, pipe);
+    const yr     = parseInt(rtScore.slice(pipe + 1));
+    return { score, rtYear: yr > 0 ? yr : null };
 }
 
-function rtBadgeHTML(score, title, year) {
-    if (!score) return '';
-    const pct = parseInt(score);
-    const fresh = pct >= 60;
-    return `<span class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" onclick="openRTMenu(event,'${esc(title)}',${year||'null'})" title="View on Rotten Tomatoes" style="cursor:pointer">${fresh ? '🍅' : '🤢'} ${score}</span>`;
+function rtUrl(rtScore, title) {
+    const { rtYear } = parseRT(rtScore);
+    const slug = rtSlug(title);
+    return rtYear
+        ? `https://www.rottentomatoes.com/m/${slug}_${rtYear}`
+        : `https://www.rottentomatoes.com/m/${slug}`;
 }
 
-function rtDetailHTML(score, title, year) {
-    if (!score) return '';
-    const pct = parseInt(score);
+function rtBadgeHTML(rtScore, title) {
+    if (!rtScore) return '';
+    const { score } = parseRT(rtScore);
+    const pct   = parseInt(score);
     const fresh = pct >= 60;
+    const url   = rtUrl(rtScore, title);
+    return `<a class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" href="${url}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="View on Rotten Tomatoes">${fresh ? '🍅' : '🤢'} ${score}</a>`;
+}
+
+function rtDetailHTML(rtScore, title) {
+    if (!rtScore) return '';
+    const { score } = parseRT(rtScore);
+    const pct   = parseInt(score);
+    const fresh = pct >= 60;
+    const url   = rtUrl(rtScore, title);
     return `
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
-            <span class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" onclick="openRTMenu(event,'${esc(title)}',${year||'null'})" style="cursor:pointer" title="View on Rotten Tomatoes">${fresh ? '🍅' : '🤢'} ${score}</span>
+            <a class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" href="${url}" target="_blank" rel="noopener" title="View on Rotten Tomatoes">${fresh ? '🍅' : '🤢'} ${score}</a>
             <span style="font-size:0.78rem;color:#555">Rotten Tomatoes</span>
         </div>`;
 }
@@ -1413,7 +1416,7 @@ function movieCardHTML(m) {
         <div class="movie-info">
             <div class="movie-title" title="${escHtml(m.title)}">${escHtml(m.title)}</div>
             <div class="movie-year">${m.year || ''}</div>
-            ${rtBadgeHTML(m.rt_score, m.title, m.year)}
+            ${rtBadgeHTML(m.rt_score, m.title)}
         </div>
     </div>`;
 }
@@ -1446,7 +1449,7 @@ function openDetail(id) {
             <div class="detail-info">
                 <div class="detail-title">${escHtml(m.title)}</div>
                 <div class="detail-year">${m.year || 'Unknown year'}${m.location === 'upcoming' ? ' &nbsp;·&nbsp; <span style="color:#eab308;font-size:0.82rem">⏳ Coming Soon</span>' : ''}${m.watched && m.watched_at ? ` &nbsp;·&nbsp; <span style="color:#4CAF50;font-size:0.82rem">Watched ${new Date(m.watched_at).toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'})}</span>` : ''}</div>
-                ${m.rt_score ? rtDetailHTML(m.rt_score, m.title, m.year) : ''}
+                ${m.rt_score ? rtDetailHTML(m.rt_score, m.title) : ''}
                 <div class="detail-overview">${escHtml(m.overview || 'No description available.')}</div>
                 <div class="detail-actions">
                     ${m.trailer_key
