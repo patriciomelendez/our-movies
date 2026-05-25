@@ -738,7 +738,7 @@ let locationFilter  = 'any'; // 'any' | 'streaming' | 'theater'
 // INIT
 // ─────────────────────────────────────────────
 const UNLOCK_DURATION = 10 * 60 * 1000; // 10 minutes
-const RT_VER = 4; // bump this to force re-fetch of all RT scores
+const RT_VER = 5; // bump this to force re-fetch of all RT scores
 
 async function init() {
     const { data, error } = await db.from('movies').select('*').order('added_at', { ascending: false });
@@ -1064,7 +1064,7 @@ async function tmdbTrailer(tmdbId, mediaType) {
 // ─────────────────────────────────────────────
 // ROTTEN TOMATOES (OMDb)
 // ─────────────────────────────────────────────
-async function fetchRTScore(title, year) {
+async function fetchRTScore(title, year, tmdbId) {
     try {
         let score = null;
         let omdbTitle = null; // OMDb's canonical title — used for RT slug (more accurate than TMDB)
@@ -1091,15 +1091,22 @@ async function fetchRTScore(title, year) {
 
         if (!score) return null;
 
-        // 3. Detect RT slug format using TMDB collision count
+        // 3. Detect RT slug format using TMDB:
+        //    RT gives the canonical (no-year) slug to the EARLIEST movie with a given title.
+        //    If an OLDER movie with the same title exists, our movie needs the year suffix.
+        //    e.g. Frankenstein 2025 → older versions exist → use /m/frankenstein_2025
+        //         Mind Game 2004   → no older "Mind Game" exists → use /m/mind_game
         let slugYr = 0;
         if (year) {
             const r3 = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}`);
             const d3 = await r3.json();
-            const exactMatches = (d3.results || []).filter(m =>
-                (m.title || '').toLowerCase() === title.toLowerCase()
-            );
-            if (exactMatches.length > 1) slugYr = year;
+            const hasOlderVersion = (d3.results || []).some(m => {
+                if ((m.title || '').toLowerCase() !== title.toLowerCase()) return false;
+                if (m.id === tmdbId) return false; // skip our own movie
+                const mYear = m.release_date ? parseInt(m.release_date.slice(0, 4)) : 9999;
+                return mYear < year;
+            });
+            if (hasOlderVersion) slugYr = year;
         }
 
         // Format: "87%|slugYear|version|OMDb title"
@@ -1112,7 +1119,7 @@ async function fetchRTScore(title, year) {
 
 async function refreshRTScores(list) {
     for (const m of list) {
-        const score = await fetchRTScore(m.title, m.year);
+        const score = await fetchRTScore(m.title, m.year, m.tmdb_id);
         if (score) {
             await db.from('movies').update({ rt_score: score }).eq('id', m.id);
             m.rt_score = score;
@@ -1218,7 +1225,7 @@ async function selectResult(index) {
     const [trailerKey, location, rtScore] = await Promise.all([
         tmdbTrailer(r.id, isTv ? 'tv' : 'movie'),
         isTv ? Promise.resolve('any') : detectLocation(r.id),
-        isTv ? Promise.resolve(null) : fetchRTScore(title, year)
+        isTv ? Promise.resolve(null) : fetchRTScore(title, year, r.id)
     ]);
 
     const item = {
