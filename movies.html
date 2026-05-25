@@ -738,7 +738,7 @@ let locationFilter  = 'any'; // 'any' | 'streaming' | 'theater'
 // INIT
 // ─────────────────────────────────────────────
 const UNLOCK_DURATION = 10 * 60 * 1000; // 10 minutes
-const RT_VER = 3; // bump this to force re-fetch of all RT scores
+const RT_VER = 4; // bump this to force re-fetch of all RT scores
 
 async function init() {
     const { data, error } = await db.from('movies').select('*').order('added_at', { ascending: false });
@@ -1067,6 +1067,7 @@ async function tmdbTrailer(tmdbId, mediaType) {
 async function fetchRTScore(title, year) {
     try {
         let score = null;
+        let omdbTitle = null; // OMDb's canonical title — used for RT slug (more accurate than TMDB)
 
         // 1. Try OMDb with year for precise match
         if (year) {
@@ -1074,7 +1075,7 @@ async function fetchRTScore(title, year) {
             const d = await r.json();
             if (d.Response === 'True') {
                 const rt = (d.Ratings || []).find(x => x.Source === 'Rotten Tomatoes');
-                if (rt) score = rt.Value;
+                if (rt) { score = rt.Value; omdbTitle = d.Title; }
             }
         }
 
@@ -1084,16 +1085,13 @@ async function fetchRTScore(title, year) {
             const d2 = await r2.json();
             if (d2.Response === 'True') {
                 const rt2 = (d2.Ratings || []).find(x => x.Source === 'Rotten Tomatoes');
-                if (rt2) score = rt2.Value;
+                if (rt2) { score = rt2.Value; omdbTitle = d2.Title; }
             }
         }
 
         if (!score) return null;
 
-        // 3. Detect RT slug format using TMDB:
-        //    Search TMDB for this title — if multiple movies share the EXACT same title,
-        //    RT needs the year suffix to disambiguate (e.g. /m/frankenstein_2025).
-        //    Unique titles (e.g. "Mile End Kicks") get no year suffix.
+        // 3. Detect RT slug format using TMDB collision count
         let slugYr = 0;
         if (year) {
             const r3 = await fetch(`https://api.themoviedb.org/3/search/movie?api_key=${TMDB_KEY}&query=${encodeURIComponent(title)}`);
@@ -1104,9 +1102,11 @@ async function fetchRTScore(title, year) {
             if (exactMatches.length > 1) slugYr = year;
         }
 
-        // Encode as "87%|2025|3" (year needed) or "87%|0|3" (unique title, no year)
-        // The last segment is RT_VER — bump it to force a global re-fetch
-        return slugYr > 0 ? `${score}|${slugYr}|${RT_VER}` : `${score}|0|${RT_VER}`;
+        // Format: "87%|slugYear|version|OMDb title"
+        // OMDb title is stored so the slug uses RT's canonical title, not TMDB's
+        // (e.g. TMDB: "Night Is Short, Walk on Girl" → OMDb: "The Night Is Short, Walk on Girl")
+        const canonical = omdbTitle || title;
+        return `${score}|${slugYr}|${RT_VER}|${canonical}`;
     } catch { return null; }
 }
 
@@ -1363,20 +1363,22 @@ function rtSlug(title) {
         .replace(/\s+/g, '_');
 }
 
-// rt_score format: "87%|2025|3" (year in slug, version 3)
-//                  "87%|0|3"    (no year needed, version 3)
-//                  "87%"        (legacy, will be re-fetched)
+// rt_score format: "87%|slugYear|version|OMDb title"
+//   slugYear = 0 → no year in slug; slugYear = 2025 → use /m/title_2025
+//   OMDb title is used for the slug (more accurate than TMDB title)
 function parseRT(rtScore) {
-    if (!rtScore) return { score: null, rtYear: null };
+    if (!rtScore) return { score: null, rtYear: null, omdbTitle: null };
     const parts = rtScore.split('|');
-    if (parts.length === 1) return { score: parts[0], rtYear: null }; // legacy
+    if (parts.length === 1) return { score: parts[0], rtYear: null, omdbTitle: null }; // legacy
     const yr = parseInt(parts[1]);
-    return { score: parts[0], rtYear: yr > 0 ? yr : null };
+    // parts[3..] joined in case the title itself contains '|'
+    const omdbTitle = parts.length > 3 ? parts.slice(3).join('|') : null;
+    return { score: parts[0], rtYear: yr > 0 ? yr : null, omdbTitle };
 }
 
 function rtUrl(rtScore, title) {
-    const { rtYear } = parseRT(rtScore);
-    const slug = rtSlug(title);
+    const { rtYear, omdbTitle } = parseRT(rtScore);
+    const slug = rtSlug(omdbTitle || title); // prefer OMDb title for accurate slug
     return rtYear
         ? `https://www.rottentomatoes.com/m/${slug}_${rtYear}`
         : `https://www.rottentomatoes.com/m/${slug}`;
