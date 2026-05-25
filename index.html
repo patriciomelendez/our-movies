@@ -1124,15 +1124,32 @@ async function fetchRTScore(title, year, tmdbId) {
 }
 
 async function refreshRTScores(list) {
-    for (const m of list) {
+    // Show a persistent indicator while refresh is in progress
+    const ind = Object.assign(document.createElement('div'), {
+        id: 'rt-refresh-indicator',
+        textContent: `🍅 Updating RT links (0/${list.length})…`
+    });
+    Object.assign(ind.style, {
+        position:'fixed', bottom:'28px', left:'50%', transform:'translateX(-50%)',
+        background:'#1a1a1a', border:'1px solid #333', borderRadius:'9px',
+        padding:'10px 18px', fontSize:'0.8rem', color:'#888', zIndex:'9998',
+        pointerEvents:'none', whiteSpace:'nowrap'
+    });
+    document.body.appendChild(ind);
+
+    for (let i = 0; i < list.length; i++) {
+        const m = list[i];
+        ind.textContent = `🍅 Updating RT links (${i+1}/${list.length})…`;
         const score = await fetchRTScore(m.title, m.year, m.tmdb_id);
         if (score) {
             await db.from('movies').update({ rt_score: score }).eq('id', m.id);
             m.rt_score = score;
         }
-        await new Promise(r => setTimeout(r, 300));
+        await new Promise(r => setTimeout(r, 400));
     }
+    ind.remove();
     renderMovies();
+    toast('RT links updated ✓', 'success');
 }
 
 let nowPlayingCA = null;
