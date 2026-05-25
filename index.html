@@ -1315,20 +1315,21 @@ function renderWatchedByMonth(list) {
     `).join('');
 }
 
-function rtSlug(title) {
-    return (title || '')
+function rtSlug(title, year) {
+    const base = (title || '')
         .toLowerCase()
         .replace(/[''`]/g, '')            // remove apostrophes
         .replace(/[^a-z0-9\s]/g, ' ')    // special chars → space
         .trim()
         .replace(/\s+/g, '_');            // spaces → underscores
+    return year ? `${base}_${year}` : base;
 }
 
 function rtBadgeHTML(score, title, year) {
     if (!score) return '';
     const pct = parseInt(score);
     const fresh = pct >= 60;
-    const rtUrl = `https://www.rottentomatoes.com/m/${rtSlug(title)}`;
+    const rtUrl = `https://www.rottentomatoes.com/m/${rtSlug(title, year)}`;
     return `<a class="rt-badge ${fresh ? 'rt-fresh' : 'rt-rotten'}" href="${rtUrl}" target="_blank" rel="noopener" onclick="event.stopPropagation()" title="View on Rotten Tomatoes">${fresh ? '🍅' : '🤢'} ${score}</a>`;
 }
 
