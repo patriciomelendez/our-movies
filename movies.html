@@ -655,21 +655,23 @@
     <div class="modal">
         <div class="modal-title" id="authModalTitle">Sign In</div>
 
-        <div class="form-group">
-            <label class="form-label">Email</label>
-            <input type="email" class="form-input" id="authEmail" placeholder="your@email.com" autocomplete="email" onkeydown="if(event.key==='Enter')document.getElementById('authPassword').focus()">
-        </div>
+        <form onsubmit="event.preventDefault();submitAuth()" autocomplete="on">
+            <div class="form-group">
+                <label class="form-label">Email</label>
+                <input type="email" class="form-input" id="authEmail" name="email" placeholder="your@email.com" autocomplete="email">
+            </div>
 
-        <div class="form-group">
-            <label class="form-label">Password</label>
-            <input type="password" class="form-input" id="authPassword" placeholder="••••••••" autocomplete="current-password" onkeydown="if(event.key==='Enter')submitAuth()">
-        </div>
+            <div class="form-group">
+                <label class="form-label">Password</label>
+                <input type="password" class="form-input" id="authPassword" name="password" placeholder="••••••••" autocomplete="current-password">
+            </div>
 
-        <div class="form-error" id="authError"></div>
+            <div class="form-error" id="authError"></div>
 
-        <div class="form-actions" style="margin-top:8px">
-            <button class="btn btn-red" id="authSubmitBtn" onclick="submitAuth()" style="width:100%">Sign In</button>
-        </div>
+            <div class="form-actions" style="margin-top:8px">
+                <button type="submit" class="btn btn-red" id="authSubmitBtn" style="width:100%">Sign In</button>
+            </div>
+        </form>
 
         <div style="text-align:center;margin-top:14px">
             <button id="authToggleBtn" style="background:none;border:none;color:#555;font-size:0.82rem;cursor:pointer;text-decoration:underline" onclick="toggleAuthMode()">First time? Create your account</button>
@@ -1422,8 +1424,6 @@ function movieCardHTML(m) {
                 ? `<img class="movie-poster" src="${src}" alt="${escHtml(m.title)}" loading="lazy">`
                 : `<div class="poster-placeholder">🎬</div>`}
             ${m.watched ? '<div class="watched-badge">✓</div>' : ''}
-            ${!m.watched && m.location === 'streaming' ? '<div class="loc-badge">📺</div>' : ''}
-            ${!m.watched && m.location === 'theater'   ? '<div class="loc-badge">🎬</div>' : ''}
             ${!m.watched && m.location === 'upcoming'  ? '<div class="loc-badge" style="background:rgba(234,179,8,0.85);color:#000">Soon</div>' : ''}
             <div class="card-overlay">
                 <button class="ov-btn" onclick="event.stopPropagation();openDetail('${m.id}')">Info</button>
